@@ -1,0 +1,37 @@
+[package]
+# パッケージ名と実行ファイルの名前も Monolio(v222。ユーザー指示で揃えた。旧名は pagelith(v171〜v221)、その前は doc-editor-desktop)。
+# 実行ファイルは下の [[bin]] で Monolio.exe にする。bundle identifier(tauri.conf.json の com.doceditor.desktop)は据え置き(変えると別アプリとして入るため)。
+name = "monolio"
+version = "1.0.0"
+description = "Monolio: single HTML technical document editor"
+license = "GPL-3.0-or-later"
+edition = "2021"
+rust-version = "1.77"
+
+[[bin]]
+name = "Monolio"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+
+# リンクを OS の「URL を開く」(ShellExecuteW)で開く(v270。Issue #67。explorer.exe へ渡すとカンマで区切られ、ローカルのファイルが動いた)。
+# 0.59 は tauri がすでに使っている版(Cargo.lock にある)なので、新しく取りに行かない。
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
+# Linux でリンクを開く(v278): GIO の「URL を開く」。0.18 は tauri(GTK)がすでに使っている版。
+[target.'cfg(target_os = "linux")'.dependencies]
+gio = "0.18"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

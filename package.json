@@ -1,0 +1,24 @@
+{
+  "name": "monolio",
+  "version": "1.0.0",
+  "private": true,
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "pwa:serve": "node editor-pwa/server.mjs",
+    "pwa:test": "node editor-pwa/test-parallel.mjs",
+    "pwa:test:serial": "node editor-pwa/test.mjs",
+    "pwa:browser": "npx playwright-core install --with-deps chromium",
+    "mermaid:build": "node editor-pwa/vendor/mermaid/build/build-mermaid.mjs",
+    "tauri": "tauri",
+    "tauri:stage": "node src-tauri/stage-frontend.mjs",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "dependencies": {
+    "playwright-core": "^1.62.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4"
+  }
+}

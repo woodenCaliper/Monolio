@@ -1,0 +1,353 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later. Copyright (C) woodenCaliper -->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-src 'self' blob:">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f6f7f9">
+<link rel="manifest" href="./manifest.webmanifest">
+<!-- 本文の見た目の正(document-style.js。Issue #201)は style.css より前に入れる(style.css は var(--doc-…) で読む)。 -->
+<!-- 数式の変換(tex-math.js。Issue #207)は document-format.js より前(読み込んだその場で window.TexMath を読む)。 -->
+<script src="./tex-math.js"></script>
+<script src="./document-format.js"></script>
+<script src="./document-style.js"></script>
+<link rel="stylesheet" href="./style.css">
+<title>Monolio</title>
+</head>
+<body>
+<div class="app">
+  <aside class="page-tree" id="page-tree" aria-label="ページ目次">
+    <div class="page-tree-heading">ページ</div>
+    <nav class="page-tree-body" id="page-tree-body" aria-label="ページの一覧"></nav>
+  </aside>
+  <div class="page-tree-resizer" id="page-tree-resizer" role="separator" aria-orientation="vertical" aria-controls="page-tree"
+    aria-label="ページ目次の幅" tabindex="0" title="ドラッグで目次の幅を変える(ダブルクリックで元の幅)"></div>
+  <main class="main">
+    <header class="toolbar">
+      <nav class="menubar" id="menubar" aria-label="Application menu">
+        <button class="page-tree-toggle" id="page-tree-toggle" type="button" aria-label="ページ目次を開閉" aria-controls="page-tree" aria-expanded="true" title="ページ目次"><i data-ui-icon="sidebar"></i></button>
+        <button class="page-nav-button" id="page-back" type="button" aria-label="前のページへ戻る" title="戻る" disabled><i data-ui-icon="arrow-left"></i></button>
+        <button class="page-nav-button" id="page-forward" type="button" aria-label="次のページへ進む" title="進む" disabled><i data-ui-icon="arrow-right"></i></button>
+        <div class="menu">
+          <button class="menu-button" id="menu-file-button" type="button" aria-haspopup="menu" aria-expanded="false">File</button>
+          <div class="menu-panel" id="menu-file-panel" role="menu" aria-labelledby="menu-file-button" hidden>
+            <button class="menu-command" id="menu-new-document" type="button" role="menuitem">New document</button>
+            <button class="menu-command" id="menu-open-document" type="button" role="menuitem">Open<span class="menu-shortcut">Ctrl+O</span></button>
+            <div class="menu-separator" role="separator"></div>
+            <button class="menu-command" id="menu-save" type="button" role="menuitem">Save<span class="menu-shortcut">Ctrl+S</span></button>
+            <button class="menu-command" id="menu-save-as" type="button" role="menuitem">Save As</button>
+            <!-- 文書チェック(Issue #236)。保存・配布の前に、参照切れ・表の式・グラフ・図・数式の誤りを右のパネルに一覧で出す(保存は止めない)。 -->
+            <button class="menu-command" id="menu-check-document" type="button" role="menuitem" title="参照切れ・表の式のエラー・グラフ・図・数式の誤りを全ページから探して一覧にする">文書をチェック…</button>
+            <div class="menu-separator" role="separator"></div>
+            <!-- Markdown(Issue #192)。書き出しは全ページを1つの .md に、読み込みは新しいページとして足す。 -->
+            <button class="menu-command" id="menu-export-markdown" type="button" role="menuitem" title="全ページを1つの .md ファイルに書き出す(画像・添付は名前だけ)">Markdown に書き出す</button>
+            <button class="menu-command" id="menu-import-markdown" type="button" role="menuitem" title=".md ファイルを新しいページとして読み込む">Markdown を読み込む…</button>
+            <div class="menu-separator" role="separator"></div>
+            <button class="menu-command" id="menu-print" type="button" role="menuitem">Print / PDF<span class="menu-shortcut">Ctrl+P</span></button>
+            <div class="menu-separator" role="separator"></div>
+            <!-- ライセンス情報(Issue #234)。本体の GPL-3.0-or-later の全文と、第三者の部品の表記を見せる。 -->
+            <button class="menu-command" id="menu-licenses" type="button" role="menuitem" title="Monolio のライセンス(GPL-3.0-or-later)と、第三者のソフトウェアの表記">ライセンス情報…</button>
+          </div>
+        </div>
+        <div class="menu">
+          <button class="menu-button" id="menu-edit-button" type="button" aria-haspopup="menu" aria-expanded="false">Edit</button>
+          <div class="menu-panel" id="menu-edit-panel" role="menu" aria-labelledby="menu-edit-button" hidden>
+            <button class="menu-command" id="menu-undo" type="button" role="menuitem">Undo<span class="menu-shortcut">Ctrl+Z</span></button>
+            <button class="menu-command" id="menu-redo" type="button" role="menuitem">Redo<span class="menu-shortcut">Ctrl+Y</span></button>
+            <div class="menu-separator" role="separator"></div>
+            <button class="menu-command" id="menu-palette" type="button" role="menuitem">Command palette<span class="menu-shortcut">Ctrl+K</span></button>
+            <div class="menu-separator" role="separator"></div>
+            <button class="menu-command" id="menu-find" type="button" role="menuitem">Find<span class="menu-shortcut">Ctrl+F</span></button>
+            <button class="menu-command" id="menu-replace" type="button" role="menuitem">Find &amp; replace<span class="menu-shortcut">Ctrl+H</span></button>
+            <div class="menu-separator" role="separator"></div>
+            <!-- 文字数(Issue #189)。このページ・選んでいる文字・選んだブロックの数を、開いたときに数えて出す。 -->
+            <button class="menu-command" id="menu-char-count" type="button" role="menuitem" title="このページと、選んでいる文字の数">文字数…</button>
+          </div>
+        </div>
+        <div class="menu">
+          <button class="menu-button" id="menu-view-button" type="button" aria-haspopup="menu" aria-expanded="false">View</button>
+          <div class="menu-panel" id="menu-view-panel" role="menu" aria-labelledby="menu-view-button" hidden>
+            <!-- いま読んでいる所の見出しを上に残す(v205)。この画面の好みで、文書には入らない。 -->
+            <button class="menu-command menu-check" id="menu-heading-path" type="button" role="menuitemcheckbox" aria-checked="true">Sticky headings</button>
+            <div class="menu-separator" role="separator"></div>
+            <!-- 見出し1〜3に番号(v218)。こちらは文書の設定で、文書に保存される(Undo できる)。 -->
+            <button class="menu-command menu-check" id="menu-heading-numbers" type="button" role="menuitemcheckbox" aria-checked="false" title="見出し1〜3に 1 / 1.1 / 1.1.1 の番号を付ける(この文書に保存)">見出しに番号</button>
+            <!-- 文書の書体と小さい文字(Issue #190。Notion のページの「スタイル」)。文書の設定で、文書に保存される(Undo できる)。
+                 見本の「Ag」はその書体で描く(書体の並びは app.js が fmt.DOCUMENT_FONT_STACKS から入れる)。 -->
+            <div class="menu-group-label" id="menu-font-style-label">文書の書体</div>
+            <div class="menu-font-styles" role="group" aria-labelledby="menu-font-style-label">
+              <button class="menu-command menu-font-style" id="menu-font-default" type="button" role="menuitemradio" aria-checked="true" data-font-style="default" title="既定の書体(環境標準のゴシック。この文書に保存)"><span class="menu-font-sample">Ag</span><span>標準</span></button>
+              <button class="menu-command menu-font-style" id="menu-font-serif" type="button" role="menuitemradio" aria-checked="false" data-font-style="serif" title="明朝(Serif。この文書に保存)"><span class="menu-font-sample">Ag</span><span>明朝</span></button>
+              <button class="menu-command menu-font-style" id="menu-font-mono" type="button" role="menuitemradio" aria-checked="false" data-font-style="mono" title="等幅(Mono。この文書に保存)"><span class="menu-font-sample">Ag</span><span>等幅</span></button>
+            </div>
+            <button class="menu-command menu-check" id="menu-small-text" type="button" role="menuitemcheckbox" aria-checked="false" title="本文と見出しの文字を小さくする(この文書に保存)">小さい文字</button>
+            <div class="menu-separator" role="separator"></div>
+            <!-- 本文の欄の幅(v260)。この画面の好みで、文書には入らない(保存した HTML の見え方は変わらない)。 -->
+            <button class="menu-command" id="menu-content-width" type="button" role="menuitem" title="本文の欄の幅を変える(この画面の好み。文書には保存しない)">本文の幅…</button>
+          </div>
+        </div>
+        <div class="menu">
+          <button class="menu-button" id="menu-files-button" type="button" aria-haspopup="menu" aria-expanded="false">Attach Files</button>
+          <div class="menu-panel" id="menu-files-panel" role="menu" aria-labelledby="menu-files-button" hidden>
+            <button class="menu-command" id="attach-files" type="button" role="menuitem">Attach file</button>
+            <button class="menu-command" id="embed-font" type="button" role="menuitem">Embed font</button>
+            <div class="menu-separator" role="separator"></div>
+            <div class="menu-list" id="attachment-summary"></div>
+          </div>
+        </div>
+      </nav>
+      <!-- ページの場所(v207。ユーザー選択の案B: メニューの下の1行)。「… › 親 › 自分」。親を押すとそのページへ。1ページの文書では出さない。 -->
+      <nav class="page-path" id="page-path" aria-label="ページの場所" hidden></nav>
+      <div class="toolbar-group format-toolbar" aria-label="Text formatting">
+        <div class="font-field" id="format-font-field">
+          <!-- フォント選択(v180。<select> をやめて独自のメニューに。Issue #4)。ボタンの文字が今の書体名(混在は空)。 -->
+          <button class="format-select font-trigger" id="format-font" type="button" title="Font" aria-label="Font" aria-haspopup="listbox" aria-expanded="false" aria-controls="format-font-menu"></button>
+          <div class="font-popover" id="format-font-menu" hidden>
+            <input class="font-search" id="format-font-search" type="text" autocomplete="off" spellcheck="false" placeholder="フォントを検索" aria-label="フォントを検索" role="combobox" aria-expanded="true" aria-controls="format-font-list" aria-autocomplete="list">
+            <div class="font-list" id="format-font-list" role="listbox" aria-label="Fonts"></div>
+          </div>
+        </div>
+        <div class="size-field" id="format-size-field">
+          <button class="size-step" id="format-size-decrement" type="button" title="Decrease font size (Ctrl+Shift+,)" aria-label="Decrease font size"><i data-ui-icon="minus"></i></button>
+          <input class="size-input" id="format-size" type="text" inputmode="numeric" autocomplete="off" title="Font size" aria-label="Font size" role="combobox" aria-haspopup="listbox" aria-expanded="false">
+          <button class="size-step" id="format-size-increment" type="button" title="Increase font size (Ctrl+Shift+.)" aria-label="Increase font size"><i data-ui-icon="plus"></i></button>
+          <div class="size-popover" id="format-size-menu" role="listbox" aria-label="Font sizes" hidden></div>
+        </div>
+        <button class="format-button" id="format-bold" title="Bold" aria-label="Bold"><i data-ui-icon="format-bold"></i></button>
+        <button class="format-button" id="format-italic" title="Italic" aria-label="Italic"><i data-ui-icon="format-italic"></i></button>
+        <button class="format-button" id="format-underline" title="Underline (Ctrl+U)" aria-label="Underline"><i data-ui-icon="format-underlined"></i></button>
+        <button class="format-button" id="format-strike" title="Strikethrough" aria-label="Strikethrough"><i data-ui-icon="format-strikethrough"></i></button>
+        <button class="format-button" id="format-link" type="button" title="リンク" aria-label="リンク" aria-haspopup="dialog" aria-expanded="false"><i data-ui-icon="link"></i></button>
+        <button class="format-button" id="format-math" title="Equation (Ctrl+Shift+E)" aria-label="Insert equation"><i data-ui-icon="sqrt"></i></button>
+        <button class="format-button" id="format-reset" title="Clear formatting" aria-label="Clear formatting"><i data-ui-icon="format-clear"></i></button>
+        <div class="color-picker" id="format-color-picker">
+          <button class="color-tool" id="format-color-trigger" type="button" title="Text color" aria-label="Text color" aria-haspopup="menu" aria-expanded="false">
+            <span class="color-glyph" aria-hidden="true">A</span>
+            <span class="color-indicator" id="format-color-indicator" aria-hidden="true"></span>
+          </button>
+          <div class="color-popover" id="format-color-menu" role="menu" aria-label="Text colors" hidden>
+            <div class="color-options" id="format-color-options"></div>
+            <label class="color-swatch custom-color-swatch" title="Custom text color">
+              <span class="custom-color-chip" id="format-color-custom-chip" aria-hidden="true">+</span>
+              <span class="sr-only">Custom text color</span>
+              <input id="format-color" type="color" value="#202124" aria-label="Custom text color">
+            </label>
+          </div>
+        </div>
+        <div class="color-picker" id="format-background-picker">
+          <button class="color-tool" id="format-background-trigger" type="button" title="Background color" aria-label="Background color" aria-haspopup="menu" aria-expanded="false">
+            <span class="color-glyph background-glyph" aria-hidden="true"><svg class="glyph-icon" viewBox="0 0 24 24" width="15" height="15" focusable="false"><path d="M15.1 2.6c.6-.6 1.6-.6 2.2 0l4.1 4.1c.6.6.6 1.6 0 2.2l-7.6 7.6-6.3-6.3 7.6-7.6z"/><path d="M6.6 11.1l6.3 6.3-1.7 1.7H8.4l-.7 1.1H3.1l1.4-3.3 2.1-5.8z"/></svg></span>
+            <span class="color-indicator" id="format-background-indicator" aria-hidden="true"></span>
+          </button>
+          <div class="color-popover" id="format-background-menu" role="menu" aria-label="Background colors" hidden>
+            <div class="color-options" id="format-background-options"></div>
+            <label class="color-swatch custom-color-swatch" title="Custom background color">
+              <span class="custom-color-chip" id="format-background-custom-chip" aria-hidden="true">+</span>
+              <span class="sr-only">Custom background color</span>
+              <input id="format-background" type="color" value="#ffffff" aria-label="Custom background color">
+            </label>
+          </div>
+        </div>
+        <button class="toolbar-command" id="attach-files-toolbar" type="button" title="Attach files" aria-label="Attach files"><i data-ui-icon="plus"></i> Attach</button>
+        <!-- 表の操作。フローティングだと本文へ覆いかぶさって文字が隠れるため、
+             上部のツールバーに出す。カーソルが表の中にあるときだけ現れる。 -->
+        <input class="hidden" id="open-input" type="file" accept=".html,text/html">
+        <input class="hidden" id="attach-input" type="file" multiple>
+        <input class="hidden" id="markdown-input" type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" multiple>
+        <input class="hidden" id="cover-input" type="file" accept="image/*">
+        <input class="hidden" id="font-input" type="file" accept=".woff2,.woff,.ttf,.otf,font/woff2,font/woff,font/ttf,font/otf" multiple>
+      </div>
+      <!-- 文書内検索・置換。ツールバー直下の右端に控えめに浮かべ、本文の流れを
+           押し下げない（Notion / Google ドキュメントの検索バーと同じ位置取り）。 -->
+      <div class="search-bar" id="search-bar" role="search" aria-label="Find and replace" hidden>
+        <div class="search-row">
+          <input class="search-text" id="search-input" type="text" placeholder="Find in document" aria-label="Find in document" autocomplete="off" spellcheck="false">
+          <span class="search-count" id="search-count" aria-live="polite"></span>
+          <button class="search-button" id="search-prev" type="button" title="Previous match (Shift+Enter)" aria-label="Previous match"><i data-ui-icon="arrow-up"></i></button>
+          <button class="search-button" id="search-next" type="button" title="Next match (Enter)" aria-label="Next match"><i data-ui-icon="arrow-down"></i></button>
+          <button class="search-button" id="search-close" type="button" title="Close (Esc)" aria-label="Close search"><i data-ui-icon="close"></i></button>
+        </div>
+        <div class="search-row search-scope-row">
+          <select class="search-scope" id="search-scope" aria-label="検索の範囲" title="検索の範囲">
+            <option value="page">このページ</option>
+            <option value="subtree">このページと子ページ</option>
+            <option value="all">全ページ</option>
+          </select>
+          <span class="search-page" id="search-page" aria-live="polite"></span>
+        </div>
+        <div class="search-row" id="search-replace-row" hidden>
+          <input class="search-text" id="search-replace-input" type="text" placeholder="Replace with" aria-label="Replace with" autocomplete="off" spellcheck="false">
+          <button class="search-action" id="search-replace-one" type="button">Replace</button>
+          <button class="search-action" id="search-replace-all" type="button">Replace all</button>
+        </div>
+      </div>
+      <span class="sr-only" id="status" aria-live="polite">Ready</span>
+    </header>
+    <!-- いま読んでいる所の見出し(v205)。見出しが上へ流れたら、ツールバーの下に「見出し1 › 見出し2 › 見出し3」を1行で残す。 -->
+    <nav class="heading-path" id="heading-path" aria-label="いま読んでいる所の見出し" hidden></nav>
+    <!-- 表の道具(v216)。表のセルにいる間だけ、画面の一番下に帯で出す(上のツールバーに出すと、狭い画面で文書がずれた)。 -->
+    <div class="table-toolbar" id="table-toolbar" role="group" aria-label="Table tools" hidden></div>
+
+    <!-- ページのカバー画像(Issue #184)。本文の欄の端から端までの帯。押す道具(変更・位置・削除)は画像に乗せたときだけ出る。 -->
+    <div class="page-cover" id="page-cover" hidden>
+      <img class="page-cover-image" id="page-cover-image" alt="" draggable="false">
+      <div class="page-cover-tools" id="page-cover-tools">
+        <button class="page-cover-tool" id="page-cover-change" type="button" aria-haspopup="menu" aria-expanded="false">カバーを変更</button>
+        <button class="page-cover-tool" id="page-cover-reposition" type="button" aria-pressed="false">位置を調整</button>
+        <button class="page-cover-tool" id="page-cover-remove" type="button">削除</button>
+      </div>
+      <div class="page-cover-hint" id="page-cover-hint" hidden>ドラッグで位置を合わせる</div>
+    </div>
+    <section class="doc">
+      <div class="title-row">
+        <!-- アイコン・カバーを足す道具(Issue #184)。題名の帯に乗せたときだけ、題名の上の余白に出る(帯に常に出る文字は足さない)。 -->
+        <div class="page-head-tools" id="page-head-tools">
+          <button class="page-head-tool" id="page-add-icon" type="button" aria-haspopup="menu" aria-expanded="false"><i data-ui-icon="emoji"></i>アイコンを追加</button>
+          <button class="page-head-tool" id="page-add-cover" type="button" aria-haspopup="menu" aria-expanded="false"><i data-ui-icon="image"></i>カバーを追加</button>
+        </div>
+        <!-- ページのアイコン(Issue #184)。題名の上の1行。押すと絵文字を選び直す・外す。 -->
+        <div class="page-icon-row" id="page-icon-row" hidden>
+          <button class="page-icon" id="page-icon" type="button" aria-haspopup="menu" aria-expanded="false" title="アイコンを変更・削除" aria-label="ページのアイコン"></button>
+        </div>
+        <div class="title" id="doc-title" contenteditable="true" role="textbox" aria-label="Document title">Untitled</div>
+        <!-- 被リンク(Issue #188)。ほかのページからこのページへのリンクがあるときだけ、数を出す。押すと一覧。 -->
+        <button class="page-backlinks" id="page-backlinks" type="button" aria-haspopup="menu" aria-expanded="false" hidden><i data-ui-icon="link"></i><span class="page-backlinks-count" id="page-backlinks-count"></span></button>
+        <!-- ページのロック(v178)。押すとロック、もう一度押すと解除。 -->
+        <button class="page-lock-toggle" id="page-lock-toggle" type="button" aria-pressed="false" title="ページをロック" aria-label="ページをロック"><i data-ui-icon="lock-open"></i></button>
+      </div>
+      <div class="blocks" id="blocks"></div>
+    </section>
+  </main>
+</div>
+
+<div class="block-marquee" id="block-marquee" aria-hidden="true" hidden></div>
+<!-- 注意(setStatus の warn)を画面の下に少しの間だけ出す知らせ(v179。v178 のロックの知らせを一般化)。 -->
+<div class="app-notice" id="notice" aria-hidden="true" hidden></div>
+<div class="popover" id="slash-menu" role="listbox" aria-label="Block types" hidden></div>
+<!-- 文中の日付を選び直す小さな窓(Issue #173)。日付の印を押すと開く。 -->
+<div class="popover date-popover" id="date-popover" role="dialog" aria-label="日付" hidden>
+  <input class="date-input" id="date-input" type="date" aria-label="日付">
+</div>
+<!-- リンクの行き先を入れる小さな欄(v200)。書式ツールバーのリンクのボタンから開く。 -->
+<div class="popover link-popover" id="link-popover" role="dialog" aria-label="リンク" hidden>
+  <input class="link-url" id="link-url" type="text" placeholder="https://… またはメールアドレス" autocomplete="off" spellcheck="false" aria-label="リンクの行き先">
+  <div class="link-popover-actions">
+    <button class="link-apply" id="link-apply" type="button">適用</button>
+    <button class="link-remove" id="link-remove" type="button" hidden>リンクを外す</button>
+  </div>
+  <div class="link-popover-error" id="link-error" role="alert" hidden></div>
+</div>
+<div class="popover content-width-popover" id="content-width-popover" role="dialog" aria-label="本文の幅" hidden>
+  <div class="content-width-head">本文の幅 <span class="content-width-value" id="content-width-value"></span></div>
+  <input class="content-width-range" id="content-width-range" type="range" min="600" max="2400" step="20" aria-label="本文の幅">
+  <div class="content-width-actions">
+    <button id="content-width-default" type="button">標準に戻す</button>
+    <button id="content-width-full" type="button">画面いっぱい</button>
+  </div>
+  <div class="content-width-note">この画面の好みです(文書には保存しません)</div>
+</div>
+<!-- 文字数(Issue #189)。改行は数えない。空白は「文字数」に入れ、「空白を除く」には入れない。 -->
+<div class="popover count-popover" id="count-popover" role="dialog" aria-label="文字数" hidden>
+  <div class="count-head">文字数</div>
+  <table class="count-table">
+    <thead><tr><th scope="col"></th><th scope="col">文字数</th><th scope="col">空白を除く</th></tr></thead>
+    <tbody id="count-rows"></tbody>
+  </table>
+  <div class="count-note">改行は数えません。表は見えている値、図・数式のコードは数えません。</div>
+</div>
+<!-- ライセンス情報(Issue #234)。File メニューから開く。全文は legal/ の文書を読んで出す(app.js の showLicenseDoc)。 -->
+<div class="popover license-popover" id="license-popover" role="dialog" aria-label="ライセンス情報" hidden>
+  <div class="license-head">Monolio のライセンス</div>
+  <div class="license-summary">
+    Monolio は自由ソフトウェアです。GNU General Public License v3.0 またはそれ以降(GPL-3.0-or-later)で提供します。<br>
+    Copyright (C) woodenCaliper。無保証です(全文の第15〜17条)。<br>
+    Monolio で作った文書の中身には、このライセンスは及びません。<br>
+    ソースコード(各版に対応するもの)と案内: https://github.com/woodenCaliper/Monolio
+  </div>
+  <div class="license-tabs" role="tablist" aria-label="表示する文書">
+    <button class="license-tab" type="button" role="tab" data-license-doc="license" aria-selected="true">ライセンス全文(GPL v3)</button>
+    <button class="license-tab" type="button" role="tab" data-license-doc="third" aria-selected="false">第三者の表記</button>
+    <button class="license-tab" type="button" role="tab" data-license-doc="desktop" aria-selected="false">デスクトップ版の部品</button>
+  </div>
+  <pre class="license-text" id="license-text" tabindex="0" aria-label="ライセンスの文"></pre>
+  <div class="license-actions"><button id="license-close" type="button">閉じる</button></div>
+</div>
+<div class="popover block-menu" id="block-menu" role="menu" aria-label="Block actions" hidden></div>
+<div class="popover page-menu" id="page-menu" role="menu" aria-label="ページの操作" hidden></div>
+<!-- カバー画像を選ぶ一覧(Issue #184)。文書の画像の添付と「画像ファイルを選ぶ…」。見た目は目次のページのメニューと同じ。 -->
+<div class="popover page-menu cover-menu" id="cover-menu" role="menu" aria-label="カバー画像" hidden></div>
+<!-- 被リンクの一覧(Issue #188)。見た目は目次のページのメニューと同じ(.popover / .menu-item)。 -->
+<div class="popover page-menu backlinks-menu" id="backlinks-menu" role="menu" aria-label="このページへのリンク" hidden></div>
+<div class="palette-backdrop" id="palette-backdrop" hidden>
+  <div class="palette">
+    <input id="palette-input" placeholder="Search commands">
+    <div class="palette-results" id="palette-results"></div>
+  </div>
+</div>
+
+<!-- 画面右下のバージョン表示。実体は service-worker.js の版数ただ1つで、
+     app 側は起動時にそれを読むだけ(数字がズレる事故を防ぐ)。保存HTMLには出ない。 -->
+<div class="version-badge" id="version-badge" aria-hidden="true"></div>
+<!-- 印刷・PDF(v182)は、保存HTMLと同じ形をこの見えない枠で開いて刷る(printDocument)。 -->
+
+<!-- グラフ設定GUI。実態は「グラフ生成コードを書き換えるボタン」で、コードが唯一の真実。
+     本文(.block-content)の中に入れると textContent がキャレット計算とシリアライズを
+     壊すため、#blocks の外の右ペインとして置く。 -->
+<aside class="chart-pane" id="chart-pane" role="complementary" aria-label="グラフの設定" hidden>
+  <div class="chart-pane-header">グラフの設定</div>
+  <!-- 解釈できずに温存している行(GUI では編集できない設定)があることを知らせる。 -->
+  <div class="chart-pane-note" id="chart-pane-foreign" hidden></div>
+  <!-- 範囲を表から選んでいる間の案内(v160)。 -->
+  <div class="chart-pane-note chart-pane-pick-hint" id="chart-pane-pick-hint" role="status" hidden></div>
+  <!-- データの表: 直上の表(自動)か、ページの中の表(GUI が書くのは table(id="…")。手で書いた table(n) も読む)。 -->
+  <div class="chart-pane-table-row">
+    <label class="chart-pane-table">データの表 <select id="chart-pane-table"></select></label>
+    <button type="button" class="chart-pane-table-jump" id="chart-pane-table-jump" title="読んでいる表へ移動">表へ移動</button>
+  </div>
+  <div class="chart-pane-section" id="chart-pane-series"></div>
+  <button class="chart-pane-add" id="chart-pane-add" type="button"><i data-ui-icon="plus"></i> 系列を追加</button>
+  <div class="chart-pane-section chart-pane-globals">
+    <label>題名 <input id="chart-pane-title" type="text" autocomplete="off" spellcheck="false"></label>
+    <label>X 軸の名前 <input id="chart-pane-xlabel" type="text" autocomplete="off" spellcheck="false"></label>
+    <label>Y 軸の名前 <input id="chart-pane-ylabel" type="text" autocomplete="off" spellcheck="false"></label>
+    <div class="chart-pane-limits">
+      <label>X の最小 <input id="chart-pane-xmin" type="text" inputmode="decimal" placeholder="自動" autocomplete="off" spellcheck="false"></label>
+      <label>X の最大 <input id="chart-pane-xmax" type="text" inputmode="decimal" placeholder="自動" autocomplete="off" spellcheck="false"></label>
+      <label>Y の最小 <input id="chart-pane-ymin" type="text" inputmode="decimal" placeholder="自動" autocomplete="off" spellcheck="false"></label>
+      <label>Y の最大 <input id="chart-pane-ymax" type="text" inputmode="decimal" placeholder="自動" autocomplete="off" spellcheck="false"></label>
+    </div>
+    <div class="chart-pane-note" id="chart-pane-xlim-note" hidden></div>
+    <label>目盛線 <select id="chart-pane-grid">
+      <option value="y">横(既定)</option><option value="x">縦</option><option value="both">縦と横</option><option value="none">なし</option>
+    </select></label>
+    <label>凡例 <select id="chart-pane-legend">
+      <option value="auto">自動(系列が2つ以上で表示)</option><option value="right">右</option><option value="bottom">下</option>
+      <option value="top">上</option><option value="left">左</option><option value="none">表示しない</option>
+    </select></label>
+  </div>
+</aside>
+
+<div class="image-lightbox" id="image-lightbox" role="dialog" aria-modal="true" aria-label="Image preview" hidden>
+  <div class="image-lightbox-bar" id="image-lightbox-bar">
+    <button class="image-lightbox-tool" id="image-lightbox-zoom-out" type="button" title="Zoom out (-)" aria-label="Zoom out"><i data-ui-icon="minus"></i></button>
+    <span class="image-lightbox-level" id="image-lightbox-level" aria-live="polite">100%</span>
+    <button class="image-lightbox-tool" id="image-lightbox-zoom-in" type="button" title="Zoom in (+)" aria-label="Zoom in"><i data-ui-icon="plus"></i></button>
+    <button class="image-lightbox-tool image-lightbox-text" id="image-lightbox-fit" type="button" title="Fit to screen (0)">Fit</button>
+    <button class="image-lightbox-tool image-lightbox-text" id="image-lightbox-actual" type="button" title="Actual size (1)">100%</button>
+  </div>
+  <button class="image-lightbox-close" id="image-lightbox-close" type="button" title="Close image preview" aria-label="Close image preview"><i data-ui-icon="close"></i></button>
+  <img class="image-lightbox-image" id="image-lightbox-image" alt="">
+  <div class="image-lightbox-svg" id="image-lightbox-svg" hidden></div>
+  <div class="image-lightbox-title" id="image-lightbox-title" hidden></div>
+  <iframe class="image-lightbox-pdf" id="image-lightbox-pdf" title="" hidden></iframe>
+</div>
+
+<!-- 表の計算(table-formula.js)→ グラフ(chart.js。表の計算を使う)→ app.js の順(Issue #207)。 -->
+<script src="./table-formula.js"></script>
+<script src="./chart.js"></script>
+<!-- 文書チェック(Issue #236)。表の計算・グラフの後、app.js の前。 -->
+<script src="./document-check.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>

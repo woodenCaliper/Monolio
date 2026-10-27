@@ -1,0 +1,6 @@
+# 同梱したライブラリは中身をそのまま配る(改行コードを変えない)。
+editor-pwa/vendor/** -text
+# ライセンスの全文・第三者の表記も中身をそのまま配る(LICENSE は GPL の公式全文)。
+LICENSE -text
+editor-pwa/legal/** -text
+src-tauri/legal/** -text

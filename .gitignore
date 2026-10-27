@@ -1,0 +1,9 @@
+# Tauri (デスクトップ版) のビルド生成物
+src-tauri/target/
+src-tauri/gen/
+src-tauri/frontend/
+
+# テストの生成物 (npm run pwa:test が毎回作り直す。コミット対象にしない)
+editor-pwa/out/
+# 全テストで測ったスイートごとの時間(次の全テストの並べる順に使う。機械ごとに違うので共有しない)
+editor-pwa/tests/.suite-seconds.local.json

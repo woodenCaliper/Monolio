@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "targets": ["deb", "appimage"],
+    "category": "Productivity",
+    "shortDescription": "Single HTML technical document editor",
+    "longDescription": "Monolio is a technical document editor that keeps a whole document (blocks, calculating tables, math, charts, pages and attachments) in one HTML file that opens in any browser.",
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": true
+      }
+    }
+  }
+}

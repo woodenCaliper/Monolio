@@ -1,0 +1,18 @@
+{
+  "name": "Monolio",
+  "short_name": "Monolio",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fbfbfa",
+  "theme_color": "#f6f7f9",
+  "description": "Monolio: a lightweight block editor for self-contained HTML technical documents.",
+  "icons": [
+    {
+      "src": "./icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

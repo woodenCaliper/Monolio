@@ -1,0 +1,2887 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Copyright (C) woodenCaliper */
+/* 色・寸法の正は document-style.js の TOKENS(--doc-…。index.html の <head> で :root に入る。Issue #201)。本文の見た目の値はここに直に書かない
+   (書くと保存HTMLとずれる。テスト documentStyleSingleSource が見る)。下の名前は画面の部品が使う呼び名で、値は --doc-… から取る。 */
+:root {
+  color-scheme: light;
+  --bg: #fbfbfa;
+  --surface: #ffffff;
+  --ink: var(--doc-ink);
+  --muted: var(--doc-muted);
+  --line: var(--doc-line);
+  --soft: var(--doc-soft);
+  /* 目次の親子をつなぐ線(v184)。 */
+  --tree-line: var(--doc-rule);
+  --accent: var(--doc-accent);
+  /* 本文のページブロック(ページへのリンク)の文字とアイコンの色。 */
+  --page-link: var(--doc-accent);
+  --page-link-icon: var(--doc-ink);
+  --accent-soft: var(--doc-accent-soft);
+  --warn: var(--doc-warn);
+  --ok: var(--doc-ok);
+  --shadow: 0 12px 36px var(--doc-shadow);
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--ink);
+  background: var(--bg);
+  /* 環境標準のフォント（v122 で同梱を撤去）。書体の並びと大きさは保存HTMLと同じトークン(document-style.js)。 */
+  font: var(--doc-font-size)/1.55 var(--doc-font);
+}
+button, input { font: inherit; }
+button {
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 5px 9px;
+  cursor: pointer;
+}
+/* 全体の hover(薄い灰の地)。地の色そのものが意味のボタン(付いているチェックの緑・主ボタンの青)は、
+   :where(:not(…)) の中へ並べて hover で地を奪わない(奪うと白い ✓・白い字が灰の地に溶けて消える。#250)。
+   :where で詳細度を 0 にするのは、:not だけだと詳細度が上がり、.active などの状態の地まで負けるため。
+   詳細度を上げて個別に守るのではなく、状態を地で見せるボタンを足したらここへ足す。 */
+button:hover:where(:not(.sg-box-on, .link-apply)) { background: var(--soft); }
+button.primary { border-color: var(--accent); background: var(--accent); color: #fff; }
+button.icon { width: 32px; min-width: 32px; padding: 0; }
+button:disabled { opacity: .65; cursor: wait; }
+.hidden { display: none; }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.app {
+  display: grid;
+  /* 1列目はページ目次(畳むと幅 0)、2列目は目次の幅を変えるつまみ(幅 0 の列に重ねて置く)、3列目が本文。
+     列を明示するのは、目次を畳んで display:none にしたとき本文が前の列(auto)へ繰り上がらないようにするため。 */
+  grid-template-columns: auto 0 minmax(0, 1fr);
+  min-height: 100vh;
+}
+.app > .main { grid-column: 3; }
+/* ---- ページ目次(左ペイン、常設) ---- */
+.page-tree {
+  grid-column: 1;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  width: var(--page-tree-width, 240px);
+  height: 100vh;
+  overflow: auto;
+  border-right: 1px solid var(--line);
+  background: var(--soft);
+  padding: 14px 8px 24px;
+}
+.page-tree.is-collapsed { display: none; }
+/* 目次の右端のつまみ(v199)。ドラッグで目次の幅を変え、ダブルクリックで元の幅に戻す。境目の線に重ねて置き、
+   乗せたとき・動かしているときだけ色の付いた線を出す(段組みの .column-resizer と同じ見せ方)。 */
+.page-tree-resizer {
+  grid-column: 2;
+  grid-row: 1;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  z-index: 6;
+  width: 9px;
+  height: 100vh;
+  margin-left: -5px;
+  outline: 0;
+  cursor: col-resize;
+  touch-action: none;
+}
+.page-tree-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 3px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity .12s ease;
+}
+.page-tree-resizer:hover::after,
+.page-tree-resizer:focus-visible::after { opacity: .55; }
+.page-tree-resizer.resizing::after { opacity: 1; }
+.page-tree.is-collapsed + .page-tree-resizer { display: none; }
+/* 動かしている間は、本文の上でもつまみのカーソルのままにし、文字が選ばれないようにする。 */
+body.page-tree-resizing { cursor: col-resize; user-select: none; }
+.page-tree-heading {
+  padding: 2px 8px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.page-tree-list { margin: 0; padding: 0; list-style: none; }
+/* 子ページは字下げして、親子の並びを一目で分かるようにする(全階層を常に開いて見せる)。 */
+.page-tree-list .page-tree-list { padding-left: 18px; }
+/* 親子をつなぐ線(v184。ユーザー指示「フォルダ階層をコードで表すときのような…線の｜や├のような記号」)。
+   文字の ├ │ └ はフォントで途切れ・ずれるので、線は枠線で描く。縦線は親の文字の頭の下(子の項目の左 10px)を通り、
+   最後の子では行の真ん中で止める(└)。横線は縦線から子の項目まで。行の高さは .page-tree-item の min-height(28px)。 */
+.page-tree-list .page-tree-list > li { position: relative; }
+.page-tree-list .page-tree-list > li::before,
+.page-tree-list .page-tree-list > li::after { content: ""; position: absolute; left: -10px; pointer-events: none; }
+.page-tree-list .page-tree-list > li::before { top: 0; bottom: 0; border-left: 1px solid var(--tree-line); }
+.page-tree-list .page-tree-list > li:last-child::before { bottom: auto; height: 14px; }
+.page-tree-list .page-tree-list > li::after { top: 14px; width: 13px; border-top: 1px solid var(--tree-line); }
+.page-tree-item {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.page-tree-item:hover { background: var(--doc-hover); }
+/* 今いるページ。複数の場所に出ていれば、そのすべてを強調する。 */
+.page-tree-item.is-current { background: var(--accent-soft); font-weight: 650; }
+/* 2回目以降に出てくるページ(複数の親・循環)。ここでは中を開かないので控えめに。 */
+.page-tree-item.is-repeated { color: var(--muted); }
+/* ページ名の横の ⋯(ページのメニュー)。ふだんは隠し、行に乗ったとき・フォーカスしたときに出す。
+   ホバーの無い端末(タッチ)では常に出す。先頭ページには出さない(削除できないので)。 */
+.page-tree-row { display: flex; align-items: center; gap: 2px; }
+.page-tree-row > .page-tree-item { flex: 1; min-width: 0; }
+.page-tree-more {
+  flex: none;
+  width: 26px;
+  min-height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  line-height: 1;
+  opacity: 0;
+}
+.page-tree-row:hover .page-tree-more,
+.page-tree-more:focus-visible { opacity: 1; }
+.page-tree-more:hover { background: rgba(0, 0, 0, .06); color: var(--ink); }
+@media (hover: none) { .page-tree-more { opacity: 1; } }
+/* 目次のメニュー。狭い画面の目次オーバーレイ(z-index 25)より上に出す。**.popover と同じ詳細度だと、後に書かれた
+   .popover(z-index 20)が勝ってオーバーレイの下に潜る**ので、2つのクラスで指定する(v138 で実測して直した)。 */
+.popover.page-menu { z-index: 30; width: min(260px, calc(100vw - 24px)); }
+.page-tree-section {
+  margin-top: 14px;
+  padding: 4px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+/* ゴミ箱(Issue #187)。目次のいちばん下。中にページがあるときだけ出る。 */
+.page-tree-trash {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 28px;
+  margin-top: 14px;
+  padding: 4px 8px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+.page-tree-trash:hover { background: var(--doc-hover); color: var(--ink); }
+.page-tree-trash .ui-icon { width: 15px; height: 15px; flex: none; }
+.page-tree-trash-label { flex: 1; }
+.page-tree-trash-count { min-width: 18px; padding: 0 5px; border-radius: 9px; background: rgba(0, 0, 0, .07); font-size: 11px; line-height: 18px; text-align: center; }
+/* ゴミ箱の一覧(目次のメニューと同じ入れ物 #page-menu) */
+.popover.page-menu.is-trash { width: min(340px, calc(100vw - 24px)); max-height: min(420px, calc(100vh - 24px)); overflow: auto; }
+.trash-filter { box-sizing: border-box; width: 100%; margin: 2px 0 6px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 13px; }
+.trash-row { display: flex; align-items: center; gap: 6px; padding: 4px 4px 4px 8px; border-radius: 6px; }
+.trash-row:hover { background: rgba(0, 0, 0, .04); }
+.trash-text { flex: 1; min-width: 0; }
+.trash-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trash-meta { color: var(--muted); font-size: 11px; }
+.trash-restore { flex: none; padding: 3px 8px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink); font: inherit; font-size: 12px; white-space: nowrap; }
+.trash-restore:hover { border-color: var(--accent); color: var(--accent); }
+.trash-purge { flex: none; width: 28px; height: 26px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--muted); }
+.trash-purge:hover { background: #fdecea; color: var(--doc-danger); }
+.trash-purge .ui-icon { width: 15px; height: 15px; }
+/* ツールバー左端の ☰(目次)と ←/→(ページの戻る/進む)。狭い画面で目次が閉じていても押せる場所に置く。 */
+.page-tree-toggle,
+.page-nav-button {
+  min-width: 32px;
+  border-color: transparent;
+  background: transparent;
+  font-size: 16px;
+  line-height: 1;
+}
+/* 行き先が無いときは押せないことが見て分かるように。 */
+.page-nav-button:disabled { color: var(--muted); opacity: .45; cursor: default; }
+/* 狭い画面では本文の幅を削らず、目次は左から重ねて出す(既定は閉じた状態)。 */
+@media (max-width: 900px) {
+  .page-tree {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 25;
+    width: min(280px, 85vw);
+    transform: translateX(-100%);
+    transition: transform .15s ease;
+    box-shadow: var(--shadow);
+  }
+  .page-tree.is-collapsed { display: block; }
+  .page-tree.is-overlay-open { transform: none; }
+  .page-tree-resizer { display: none; }
+}
+/* ---- 本文の中のページリンク(ページブロック) ---- */
+.page-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 6px;
+  /* ホバーの背景に余白を持たせつつ、アイコンの左端は本文の左端にそろえる(padding ぶん戻す)。 */
+  margin-left: -6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  /* 本文の中で埋もれないよう、ほかの文より目立たせる(v153。ユーザー指示): リンクの青・太字。 */
+  color: var(--page-link);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+.page-link:hover { background: var(--soft); }
+.page-link:hover .page-link-title {
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+}
+/* アイコンは本文の文字に近い濃い色の太い輪郭(書類の形。SVG は document-format.js の PAGE_LINK_ICON_SVG)。 */
+.page-link-icon {
+  display: inline-flex;
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+  color: var(--page-link-icon);
+}
+.page-link-icon svg { display: block; width: 100%; height: 100%; }
+.page-link:disabled { color: var(--muted); font-weight: 400; cursor: default; }
+.page-link:disabled .page-link-icon { color: var(--muted); }
+.menubar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+}
+.menu { position: relative; }
+.menu-button {
+  min-height: 28px;
+  border-color: transparent;
+  background: transparent;
+  padding: 4px 10px;
+}
+.menu-button[aria-expanded="true"] {
+  border-color: var(--line);
+  background: var(--soft);
+}
+.menu-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  display: grid;
+  gap: 2px;
+  min-width: min(224px, calc(100vw - 16px));
+  /* 画面より広くしない(v252。Issue #107。左右のずらしは keepMenuPanelInView)。 */
+  max-width: calc(100vw - 16px);
+  max-height: min(60vh, 420px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 6px;
+}
+.menu-panel[hidden] { display: none; }
+.menu-command {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  border-color: transparent;
+  background: transparent;
+  text-align: left;
+}
+.menu-shortcut { color: var(--muted); font-size: 12px; }
+/* 入/切のある項目(v205)。入っているときは右端に ✓(ショートカットの位置と同じ)。 */
+.menu-check::after { content: "✓"; width: 1em; color: var(--accent); font-weight: 700; visibility: hidden; }
+.menu-check[aria-checked="true"]::after { visibility: visible; }
+.menu-separator {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--line);
+}
+.menu-list { display: grid; gap: 2px; padding: 2px; }
+.main {
+  display: grid;
+  /* 道具の帯・ページのカバー画像(Issue #184。無いページでは高さ 0)・本文の欄。 */
+  grid-template-rows: auto auto 1fr;
+  min-width: 0;
+  /* 題名の灰色(.title-row の影)を本文の欄の中で止める(v201)。clip はスクロールの箱を作らないので、道具の帯の sticky は効いたまま。 */
+  overflow-x: clip;
+}
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255,255,255,.88);
+  backdrop-filter: blur(10px);
+  padding: 10px 18px;
+}
+/* 書体・大きさ・文字色・背景色の一覧が開いている間は、帯ごと横の欄(提案の欄 25 など)より上に出す(Issue #243)。一覧は帯の中に
+   あるので、帯の重なり(5)に縛られて欄の下に隠れていた。一覧を帯の外へ出すと、押したときに文字の選択が外れるおそれがあるので、帯の
+   重なりの方を上げる。帯そのものは欄と重ならない(欄は帯の下端から始まる。app.js の placeSuggestPane)。 */
+.toolbar:has(.font-popover:not([hidden]), .size-popover:not([hidden]), .color-popover:not([hidden])) { z-index: 26; }
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.format-toolbar { gap: 4px; flex-wrap: wrap; }
+.format-select {
+  min-height: 32px;
+  max-width: 220px;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+/* フォント選択(v180。独自のメニュー。Issue #4)。ボタンの文字は書体名だけ(右の ▾ は疑似要素の絵)。 */
+.font-field { position: relative; display: inline-flex; }
+.font-trigger {
+  width: 180px;
+  padding: 4px 26px 4px 8px;
+  overflow: hidden;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  position: relative;
+}
+/* button:hover の background 一括指定で消えないよう、▾ は背景ではなく疑似要素で描く。 */
+.font-trigger::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  width: 12px;
+  height: 12px;
+  margin-top: -6px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' fill='none' stroke='%236b7078' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center / 12px 12px;
+}
+.font-trigger:disabled { cursor: default; opacity: .55; }
+.font-popover {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 26;
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  max-width: calc(100vw - 20px);
+  max-height: min(420px, calc(100vh - 80px));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .16);
+}
+.font-popover[hidden] { display: none; }
+.font-search {
+  margin: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+.font-search:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.font-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 0 6px; }
+.font-group-label { padding: 8px 12px 3px; color: var(--muted); font-size: 11px; }
+.font-empty { padding: 8px 12px; color: var(--muted); font-size: 13px; }
+.font-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 2px 8px 2px 12px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.font-option.is-active { background: var(--soft); }
+.font-option[aria-selected="true"] { background: var(--accent-soft); }
+.font-option-name { flex: 1; min-width: 0; overflow: hidden; font-size: 15px; white-space: nowrap; text-overflow: ellipsis; }
+.font-option-remove { flex: none; width: 26px; min-width: 26px; min-height: 26px; padding: 0; border-color: transparent; background: transparent; color: var(--muted); }
+.font-option-remove:hover { background: var(--line); color: var(--ink); }
+.font-option-remove .ui-icon { width: 15px; height: 15px; }
+.size-field {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.size-step {
+  width: 26px;
+  min-width: 26px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.size-step:hover { background: var(--soft); }
+.size-input {
+  width: 42px;
+  min-height: 32px;
+  padding: 4px 2px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  text-align: center;
+  cursor: text;
+}
+.size-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.size-popover {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 26;
+  min-width: 64px;
+  max-height: 288px;
+  overflow-y: auto;
+  padding: 6px 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .16);
+}
+.size-option {
+  display: block;
+  width: 100%;
+  padding: 5px 18px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.size-option:hover { background: var(--soft); }
+.size-option[aria-selected="true"] { background: var(--accent-soft); }
+.format-button {
+  width: 32px;
+  min-width: 32px;
+  padding: 0;
+}
+.format-button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.toolbar-command {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 4px 9px;
+}
+.color-picker { position: relative; }
+.color-tool {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.color-tool:hover { background: var(--soft); }
+.color-tool[aria-expanded="true"] {
+  border-color: #a9bfd8;
+  background: var(--accent-soft);
+}
+.color-glyph {
+  font-size: 15px;
+  font-weight: 720;
+  line-height: 1;
+}
+.background-glyph {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: transparent;
+}
+/* 図形のアイコン(v174。document-format.js の UI_ICONS)。大きさは置き場所ごとに下で決める。
+   アイコンだけのボタンは、ボタンの中央に置く。 */
+/* 当たり判定はボタン側に持たせる(図形がクリックを受けると、押した要素がボタンではなく svg/path になる)。 */
+.ui-icon { display: inline-block; width: 16px; height: 16px; flex: none; vertical-align: middle; pointer-events: none; }
+button > .ui-icon:only-child { display: block; margin: auto; }
+/* トグルの三角は、絵の左端を本文の左端にそろえるので中央に寄せない(.toggle-caret の説明を参照)。 */
+.toggle-caret > .ui-icon:only-child { margin: 0; }
+.menu-icon .ui-icon { width: 18px; height: 18px; }
+.menu-icon .ui-icon[data-icon^="caret"] { width: 12px; height: 12px; }
+/* トグル見出し(三角 + H1 など)は 28px の枠に収まるよう、三角も文字も小さめにする。 */
+.menu-icon.with-text .ui-icon { width: 6px; height: 6px; }
+.menu-icon.with-text .icon-text { font-size: 11px; }
+.menu-check .ui-icon { width: 16px; height: 16px; }
+.size-step .ui-icon { width: 14px; height: 14px; }
+.toolbar-command .ui-icon, .chart-pane-add .ui-icon { width: 14px; height: 14px; }
+.chart-pane-add { display: inline-flex; align-items: center; gap: 4px; }
+.image-lightbox-close .ui-icon { width: 22px; height: 22px; }
+.chart-pane-remove .ui-icon { width: 14px; height: 14px; }
+.chart-pane-pick .ui-icon { width: 15px; height: 15px; }
+/* 書式ツールバーの Material Symbols(v175)。Material は 24px で描く前提の形なので、少し大きめに置く。 */
+.format-button .ui-icon { width: 20px; height: 20px; }
+.glyph-icon {
+  display: block;
+  fill: currentColor;
+}
+.color-indicator {
+  position: absolute;
+  right: 7px;
+  bottom: 4px;
+  left: 7px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--doc-ink);
+  box-shadow: 0 0 0 1px var(--doc-shadow);
+}
+#format-background-indicator { background: transparent; }
+.color-indicator.is-none { background: transparent; }
+.color-popover {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 26;
+  display: grid;
+  grid-template-columns: repeat(5, 28px);
+  gap: 6px;
+  width: 182px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.color-popover[hidden] { display: none; }
+.color-options { display: contents; }
+.color-swatch {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 1px solid rgba(32, 33, 36, .22);
+  border-radius: 5px;
+  background: var(--swatch, #fff);
+  cursor: pointer;
+}
+.color-swatch:hover { box-shadow: 0 0 0 2px var(--accent-soft); }
+.color-swatch[aria-checked="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(11, 107, 203, .2);
+}
+.custom-color-swatch { overflow: hidden; }
+.custom-color-chip {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: var(--custom-color, var(--doc-ink));
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .45);
+}
+.custom-color-swatch input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+/* 本文の欄の幅。既定は 920px。表示 → 本文の幅… で変えられる(v260。この画面の好み。--doc-max-width は app.js が付ける)。 */
+.doc {
+  width: 100%;
+  max-width: var(--doc-max-width, 920px);
+  margin: 0 auto;
+  padding: 42px 22px 80px;
+  transition: background-color .12s ease, box-shadow .12s ease;
+}
+.main.file-drop-active .doc {
+  background: #f7fbff;
+  box-shadow: inset 0 0 0 2px #b9d5f2;
+}
+/* 題名と、その横のページのロックのボタン(v178)。 */
+/* 題名から上を、本文の欄の端から端まで薄い灰色にして、題名の部分だと一目で分かるようにする(v201。ユーザー指示:
+   「そこから上全部」「薄いグレー」、余計な情報は足さない)。色は題名の行の影(広げた box-shadow)で塗り、下だけ切る
+   (clip-path)。横は本文の欄(.main の overflow-x: clip)で止まり、目次には掛からない。下の細い線も影の2枚目で引く。
+   題名の文字の位置は今までどおり(保存HTMLの h1 と同じ値。layoutParitySuite)。 */
+.title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 22px;
+  padding-bottom: 18px;
+  background: var(--doc-title-band);
+  box-shadow: 0 0 0 100vmax var(--doc-title-band), 0 1px 0 100vmax var(--doc-title-band-line);
+  clip-path: inset(-100vmax -100vmax -1px -100vmax);
+}
+/* ブロックをまたいだドラッグの間は、文字の選択の色を隠してブロックの選択だけを見せる(v206)。 */
+#blocks.is-cross-selecting ::selection { background: transparent; }
+/* ページの場所(v207。ユーザー選択の案B)。ツールバーのメニューの下の1行に「… › 親 › 自分」。題名の上の親のページ名(v201)は
+   これに置き換えた(ユーザー指示で消した)。長い名前は「…」で詰めて1行のまま(自分の名前をなるべく残す)。 */
+.page-path { display: flex; align-items: center; max-width: 100%; min-width: 0; padding: 0 2px; font-size: 13.5px; line-height: 20px; white-space: nowrap; overflow: hidden; }
+.page-path[hidden] { display: none; }
+/* 縮む割合は 親 4 : 今のページ 1(v224。.heading-path と同じ理由: 合計が1未満だとはみ出した分の一部しか縮めず、長い題名が行からはみ出した)。 */
+.page-path-item { flex: 0 4 auto; min-width: 1.5em; min-height: 0; overflow: hidden; text-overflow: ellipsis; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
+.page-path-item:hover { color: var(--ink); text-decoration: underline; }
+.page-path-current { flex: 0 1 auto; min-width: 2.5em; overflow: hidden; text-overflow: ellipsis; color: var(--ink); font-weight: 600; }
+.page-path-sep { flex: none; margin: 0 6px; color: var(--doc-sep); }
+/* いま読んでいる所の見出し(v205。VS Code の Sticky Scroll を1行にしたもの)。スクロールで見出しが上へ流れたら、
+   ツールバーの下に見出し1〜3の道筋を1行で残す。位置(上・左・幅)と文字の頭はスクリプトが本文に合わせて決める。
+   行が増えると本文が隠れるので1行に限り、長いときは名前を「…」で詰める(今いる見出しはなるべく残す)。
+   縮む割合は 親 4 : 今の見出し 1(v224)。前は 1 : .25 だったが、縮む割合の合計が1未満だとはみ出した分の一部しか縮めない
+   (CSS の決まり)ので、今の見出しだけが縮めるとき(帯にそれ1つ・親が「…」に詰めきった)に、帯からはみ出したまま残った。 */
+.heading-path {
+  position: fixed;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: 30px;
+  padding: 0 16px 0 var(--heading-path-indent, 62px);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+  box-shadow: 0 4px 10px var(--doc-shadow-soft);
+  font-size: 13.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.heading-path[hidden] { display: none; }
+.heading-path-item {
+  flex: 0 4 auto;
+  min-width: 2.5em;
+  min-height: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.heading-path-item:last-child { flex-shrink: 1; color: var(--ink); font-weight: 650; }
+.heading-path-item:hover { color: var(--ink); text-decoration: underline; }
+.heading-path-sep { flex: none; margin: 0 8px; color: var(--doc-sep); }
+.page-lock-toggle {
+  flex: none;
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  min-height: 34px;
+  margin-top: 9px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+.page-lock-toggle:hover { background: var(--soft); color: var(--ink); }
+.page-lock-toggle[aria-pressed="true"] { color: var(--accent); }
+.page-lock-toggle .ui-icon { width: 20px; height: 20px; }
+/* 被リンク(Issue #188)。ロックのボタンの左に、リンクの印と数だけ(題名の帯に説明の文字は足さない)。リンクが無いページでは出さない。 */
+.page-backlinks {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 34px;
+  min-height: 34px;
+  margin-top: 9px;
+  padding: 0 8px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+}
+.page-backlinks[hidden] { display: none; }
+.page-backlinks:hover, .page-backlinks[aria-expanded="true"] { background: var(--soft); color: var(--ink); }
+.page-backlinks .ui-icon { width: 18px; height: 18px; }
+.popover.backlinks-menu { width: min(340px, calc(100vw - 24px)); max-height: min(420px, calc(100vh - 24px)); overflow-y: auto; }
+/* ロック中のページ: 編集の取っ手を出さない(つまみ・＋・表の取っ手・画像の大きさと寄せ)。
+   つまみと＋の入れ物(.handle)はブロックの左の列そのものなので、消すと本文がその列へ詰まる。見えなくするだけにする。 */
+.page-locked .handle { visibility: hidden; pointer-events: none; }
+.page-locked .image-resize-handle,
+.page-locked .image-align-control,
+.page-locked .table-range-handle,
+.page-locked .table-fill-handle,
+.page-locked .table-col-resizer { display: none; }
+/* 目次の鍵の印は題名の後ろに並べる(「アイコンだけのボタンは中央へ」の指定より強くする。文字は要素として数えないため)。 */
+.page-tree-item > .ui-icon.page-tree-lock { display: inline-block; width: 12px; height: 12px; margin: 0 0 0 4px; color: var(--muted); vertical-align: -1px; }
+.app-notice {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 60;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  padding: 9px 14px;
+  border-radius: 8px;
+  background: var(--doc-ink);
+  color: #fff;
+  font-size: 13px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .18);
+  border-left: 4px solid #f2b705;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.app-notice[hidden] { display: none; }
+/* 注意でない知らせ(移した・ゴミ箱へ移した・元に戻した。Issue #193・#187)は緑の印 */
+.app-notice[data-kind="ok"] { border-left-color: #34a853; }
+.title {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--doc-title-size);
+  font-weight: var(--doc-title-weight);
+  line-height: var(--doc-title-line-height);
+  min-height: 52px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.title:empty::before {
+  content: "Untitled";
+  color: #b7bbc2;
+}
+/* 本文の行の並びは素のブロックの流れ(flow-root)で組む(v221)。以前の display: grid は、1文字打つたびに
+   全ブロックの段組みをやり直し、5000 ブロックで1打鍵のレイアウトが約 50ms かかっていた(flow-root は約 9ms)。
+   見た目は grid のときと同じにする: 行どうしの間は gap: 2px の代わりに後ろの行の margin-top: 2px。
+   flow-root にするのは、先頭の行の上の余白が #blocks の外へ抜けない(grid と同じ)ようにするため。
+   行(.block)は自身が grid なので、中の余白が外へ抜けることもない。段組み(.column-layout)の上下 4px の余白は、
+   grid では隣との間(2px)に足されて相殺されなかったので、相殺されないよう上の余白だけで同じ間隔を作る。 */
+.blocks { display: flow-root; }
+/* 隣どうしの結合子(+)は使わない(v225)。#blocks の子に + の規則があると、行を1つ出し入れしただけでブラウザが全行の
+   スタイルを計算し直す(5000 ブロックで約 350ms。部分の描き直しが速くならない)。:first-child / :last-child は
+   その行だけで済む。段組みの直後の行は app.js が .after-column-layout を付ける(markColumnLayoutNeighbours)。
+   間隔は以前と同じ: 行どうし 2px・段組みの前後 6px・段組みどうし 10px・先頭の段組みの上と末尾の段組みの下 4px。 */
+.blocks > * { margin-top: 2px; }
+.blocks > :first-child { margin-top: 0; }
+.blocks > .column-layout { margin-top: 6px; margin-bottom: 0; }
+.blocks > .column-layout:first-child { margin-top: 4px; }
+.blocks > .after-column-layout { margin-top: 6px; }
+.blocks > .column-layout.after-column-layout { margin-top: 10px; }
+.blocks > .column-layout:last-child { margin-bottom: 4px; }
+/* 静的選択モード(クリック押下中・ブロックまたぎ選択)では入れ物自身が
+   contenteditable+focus になるため、UA 既定のフォーカスリング(OSのアクセント色の
+   枠)がコンテナ全体に描かれてしまう。挙動は意図どおりなので枠だけ消す。
+   キーボード操作の可視性は .block-content:focus の box-shadow が担っており無関係。 */
+.blocks[data-static-host] { outline: none; }
+.column-layout {
+  display: grid;
+  align-items: start;
+  min-width: 0;
+  margin: 4px 0;
+}
+.column {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  gap: 2px;
+  padding: 0 4px;
+  border-radius: 6px;
+}
+.column-resizer {
+  position: relative;
+  align-self: stretch;
+  width: 12px;
+  min-height: 32px;
+  height: 100%;
+  outline: 0;
+  cursor: col-resize;
+  touch-action: none;
+}
+.column-resizer::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 5px;
+  width: 2px;
+  border-radius: 2px;
+  background: #c7cdd4;
+  opacity: 0;
+  transition: opacity .12s ease;
+}
+.column-layout:hover .column-resizer::after,
+.column-resizer:focus-visible::after,
+.column-resizer.resizing::after { opacity: 1; }
+.column-resizer:focus-visible::after,
+.column-resizer.resizing::after { background: var(--accent); }
+.block {
+  position: relative;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  /* マーカー(•/番号/☐/▸)の左端を置く位置。通常の段落の本文左端と同じ
+     (ガター40px + gap4px + 本文の padding 6px = 50px)。
+     ユーザーの要求は「『・』と『か』が同じ位置」＝**マーカーの左端が本文の左端に一致**
+     すること。マーカーは本文カラムの中に入り、リストの本文はマーカーのぶん右へ出る。
+     種別ごとに数値を散らすと、マーカーの大きさを変えたとき(v109/v111/v124 で3回あった)に
+     また崩れるため、**位置も幅も変数に集約**して全種別がこれを参照する。 */
+  --marker-area-left: 50px;
+  /* マーカーと本文のあいだ。本文は「マーカーの幅 + この間隔」だけ右へ出る。 */
+  --marker-text-gap: var(--doc-marker-gap);
+  /* 本文の左右 padding(.block-content と、リストの padding-left の計算に使う)。 */
+  --content-pad: 6px;
+  /* マーカーの箱の幅。マーカー自身と、本文をどれだけ右へ出すかの両方がこれを見る。 */
+  --bullet-marker-width: var(--doc-bullet-width);
+  --todo-marker-width: var(--doc-todo-width);
+  /* トグルの三角は押せる必要があるので、当たり判定を 24px 以上に保つ
+     (WCAG 2.2 Target Size の最小 24x24 CSS px)。マーカーが本文カラム内へ入り、
+     ドラッグ用ハンドル(0..36px)と食い合わなくなったので確保できる。 */
+  --toggle-marker-width: var(--doc-toggle-width);
+  /* トグルの三角と箇条書きの点は図形(SVG・円)で描き、**絵の左端が箱の左端**になる形にしてある(v174)。
+     以前は文字(▸/▾/•)で、字形の左の余白ぶんを補正していた(v127 は固定値、v173 は開いたときに測る)が、
+     余白はフォントで違い OS によってずれた。図形なら補正は要らない。 */
+  gap: 4px;
+  align-items: start;
+  border-radius: 6px;
+  --first-line-center: 13.8px;
+  margin-left: calc(var(--indent, 0) * var(--doc-indent));
+}
+.block:hover { background: #f7f8fa; }
+.block.type-chart .block-content,
+.block.type-mermaid .block-content {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  padding: 8px 10px;
+  /* 開いたコードの枠の左右を、図の枠・本文の文字の頭・表の端にそろえる(v194。v186 の左端そろえの続き)。 */
+  margin: 0 var(--content-pad);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--soft);
+}
+/* グラフのコードは既定で畳む(v161。段4)。数式のソースと同じく 1px に畳むだけにして、キーボードからは
+   フォーカスできるようにする(フォーカスが入ったら app.js が開く)。開閉は .source-open クラス。 */
+.block.type-chart:not(.source-open) .block-content,
+.block.type-mermaid:not(.source-open) .block-content {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+/* 帯を足したので、コード欄の列を明示する(自動配置だと 40px のガター列に落ちる)。 */
+.block.type-chart .block-content,
+.block.type-mermaid .block-content { grid-column: 2; }
+.chart-source-bar,
+.mermaid-source-bar {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 2px var(--content-pad);
+  color: var(--muted);
+  font-size: 12px;
+}
+.chart-source-toggle,
+.mermaid-source-toggle {
+  min-height: 24px;
+  padding: 1px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.chart-source-toggle:hover,
+.mermaid-source-toggle:hover { background: var(--soft); }
+.chart-source-bar.has-error .chart-source-status,
+.chart-source-bar.has-foreign .chart-source-status,
+.mermaid-source-bar.has-error .mermaid-source-status { color: var(--warn); }
+.chart-canvas,
+.mermaid-canvas {
+  grid-column: 2;
+  /* 枠の左右は本文の文字の頭・表の端にそろえる(v186。ユーザー指示「表とグラフの左端がずれている」)。 */
+  margin: 8px var(--content-pad) 4px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow-x: auto;
+}
+.chart-svg {
+  display: block;
+  width: 100%;
+  max-width: 660px;
+  height: auto;
+}
+/* グラフの絵の線・字(.chart-grid など)は (document-style.js の SHARED_CSS。エディタと保存HTMLで同じ規則。Issue #201) */
+.chart-errors,
+.mermaid-errors {
+  margin-top: 6px;
+  color: #b4482f;
+  font-size: 12px;
+}
+/* Mermaid の図(v194)。並びと見た目はグラフと同じ(帯・コード・絵)。図の大きさは Mermaid が付ける max-width で決まり、
+   枠の中で真ん中に置く(保存HTMLの .doc-mermaid-canvas と同じ。P7)。文法の誤りの間は、前に描けた図を薄くして残す。 */
+.mermaid-canvas { cursor: pointer; }
+.mermaid-canvas svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+.mermaid-canvas.has-error svg { opacity: .35; }
+.mermaid-errors { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.mermaid-placeholder { padding: 10px; color: var(--muted); font-size: 13px; text-align: center; }
+/* Mermaid が描くときの見えない置き場(文字の幅を測るので display:none にはできない)。描き終えたら消す。 */
+.mermaid-sandbox { position: fixed; left: -10000px; top: 0; width: 1000px; visibility: hidden; pointer-events: none; }
+/* 表の道具(v216。ユーザー選択): 画面の一番下の帯に出す。上のツールバーに出していたときは、狭い画面(幅 1250px くらいまで)で
+   ツールバーが1行増え、セルを押すたびに文書全体が 30px 下へずれた(ダブル/トリプルクリックの2回目以降が別の所に当たる)。
+   表の上や下に浮かべる案は、表の見出しや前後の文章を隠すので採らなかった。帯は本文の列(.main)の幅で、左右の位置は
+   スクリプトが合わせる(グラフのペインが開いていれば、その左まで)。文書の末尾の余白(80px)が帯より高いので、最後の行も読める。 */
+.table-toolbar {
+  position: fixed;
+  z-index: 23;
+  bottom: 0;
+  left: var(--table-toolbar-left, 0);
+  right: var(--table-toolbar-right, 0);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--line);
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 -4px 12px var(--doc-shadow-soft);
+}
+.table-toolbar[hidden] { display: none; }
+/* 表のセル編集中は書式ツールが効かないため、無効化して見た目でも伝える */
+.format-toolbar button:disabled,
+.format-toolbar select:disabled,
+.format-toolbar input:disabled {
+  opacity: .45;
+  cursor: default;
+}
+.table-tool {
+  width: 28px;
+  min-width: 28px;
+  min-height: 26px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.table-tool:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* 行・列の選択ハンドル。アクティブなセルの列の上・行の左に出す（Notion と同じ）。 */
+.block.type-table { position: relative; }
+/* 表の上に帯を空けておく(v186)。帯には、表の呼び名(題名の無い表は「題名なし」。v193)と、編集中の列の記号(A・B・C…)を出す。
+   編集に入るたびに表が下へずれないよう、いつも空ける。つまみ・＋もこの帯の高さに置く(行番号と重ならない)。 */
+.block.type-table .editor-table { margin-top: 18px; }
+.block.type-table { --first-line-center: 9px; }
+/* 表の呼び名(v186)。表の上の帯の左端(表の左端にそろえる)に小さく出す。番号は題名の番号だけなので、題名の無い表は「題名なし」(v193)。
+   グラフを選んでいる間は、読んでいる表の呼び名を強調する。 */
+.block.type-table[data-table-label]::after { content: attr(data-table-label); position: absolute; z-index: 3; left: 50px; top: 0; color: var(--muted); font-size: 10px; line-height: 18px; white-space: nowrap; pointer-events: none; }
+.block.type-table.chart-source-table[data-table-label]::after { color: var(--accent); font-weight: 700; }
+.block.type-table.chart-source-table .block-caption-label { color: var(--accent); }
+/* 図表の題名(v191)。表は表の上、図(グラフ・画像)は下。「表n:」「図n:」は太字。題名は本文の列に置く
+   (表の題名は .block-content より前に並ぶので、本文の列を明示する)。保存HTMLの .doc-caption と同じ寸法(P7)。 */
+.block-caption {
+  grid-column: 2;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  padding: var(--doc-block-pad) var(--content-pad);
+  font-size: var(--doc-caption-size);
+  line-height: 1.5;
+}
+.block.has-caption > .block-content { grid-column: 2; }
+/* 表の題名は表のすぐ上に付ける(ユーザー指摘「上の表のことか下の表のことか分からない」)。題名の上に 18px の余白を
+   とり、上のブロックから離す。セルを編集している間だけ、題名をその余白へ上げて、題名と表のあいだに列の記号
+   (A・B・C)の帯を空ける(ユーザー指示)。表そのものは動かない(ドラッグで範囲を選ぶ途中に表がずれないように)。 */
+.block-caption-table { padding-top: 18px; }
+.block.type-table.has-caption .editor-table { margin-top: 0; }
+.block.type-table.has-caption.table-editing .block-caption-table { padding-top: 0; padding-bottom: 21px; }
+.block-caption-label { flex: none; font-weight: 700; white-space: nowrap; }
+.block-caption-label:empty { display: none; }
+.block-caption-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+}
+.block-caption-input:focus { background: #fff; box-shadow: 0 0 0 2px var(--accent-soft); }
+.block-caption-input::placeholder { color: #a5abb3; }
+/* 本文の中の図表の参照(v198)。押すと行き先へ移る。行き先が無いものは赤(保存HTMLの .figure-ref と同じ色)。 */
+.figure-ref { color: var(--page-link); cursor: pointer; border-radius: 3px; }
+.figure-ref:hover { background: var(--soft); text-decoration: underline; text-underline-offset: 3px; }
+.figure-ref.is-missing { cursor: default; }
+.figure-ref.is-missing:hover { background: transparent; text-decoration: none; }
+/* 印の色(行き先なし)と頭の絵(ページへのリンク・ブロックへのリンク)は (document-style.js の SHARED_CSS。エディタと保存HTMLで同じ規則。Issue #201) */
+/* 参照・リンクで移った先の行を少しの間だけ薄い黄色で知らせる(Issue #176。水色は選択の色と紛れるので使わない)。保存HTMLも同じ色 */
+.block.ref-flash > .block-content, .block.ref-flash .editor-table, .block.ref-flash .attachment-card, .block.ref-flash .chart-canvas { animation: ref-flash 1.6s ease-out; }
+@keyframes ref-flash { 0%, 25% { background-color: var(--doc-flash); } 100% { background-color: transparent; } }
+/* 文中の日付(Issue #173)。頭にカレンダーの印(灰色)。文字は本文の色のまま(リンクではない)。押すと日付を選び直す窓が出る。
+   折り返さないことと頭の印は (document-style.js の SHARED_CSS。エディタと保存HTMLで同じ規則。Issue #201) */
+.date-mention { cursor: pointer; border-radius: 3px; }
+.date-mention:hover { background: var(--soft); }
+.popover.date-popover { width: auto; padding: 8px; }
+.date-popover[hidden] { display: none; }
+.date-input { padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; color: var(--ink); background: var(--surface); }
+.date-input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+/* 絵文字の候補(Issue #175)。印の枠に絵文字そのものを大きめに出す。 */
+.emoji-option .menu-icon { font-size: 18px; font-weight: 400; background: transparent; }
+.block-caption[data-align="center"] { justify-content: center; }
+.block-caption[data-align="right"] { justify-content: flex-end; }
+.block-caption:not([data-align="left"]) .block-caption-input { flex: none; }
+.table-range-handle {
+  position: absolute;
+  z-index: 4;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, .18);
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+}
+.table-range-handle.column { width: 26px; height: 9px; }
+.table-range-handle.row { width: 9px; height: 26px; }
+.table-range-handle:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+/* フィルハンドル(Excel のオートフィル)。アクティブセルまたは選択範囲の右下の小さな四角。
+   .block 直下の絶対配置で、本文の文字数には影響しない。 */
+.table-fill-handle {
+  position: absolute;
+  z-index: 5;
+  width: 10px;
+  height: 10px;
+  border: 1px solid #fff;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, .35);
+  cursor: crosshair;
+  transform: translate(-50%, -50%);
+  touch-action: none;
+}
+/* 切り取った範囲(v246)。貼り付けるか Esc を押すまで、点線で囲んで動かす(Excel と同じ)。 */
+.table-cut-frame {
+  position: absolute;
+  z-index: 4;
+  pointer-events: none;
+  box-sizing: border-box;
+  border: 2px dashed var(--accent);
+  animation: table-cut-march .6s steps(4) infinite;
+}
+@keyframes table-cut-march {
+  50% { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .table-cut-frame { animation: none; }
+}
+/* フィルのドラッグ中、適用先の範囲を破線で示す。 */
+.editor-table .fill-preview {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+/* ポイントモードのドラッグ中、参照される範囲を示す(Excel の点滅枠に相当)。 */
+.editor-table .ref-preview {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+  background: var(--accent-soft);
+}
+
+/* ---- TeX数式 ---- */
+/* 数式ブロックのソース。コードブロックと同じ等幅の入力欄。 */
+.block.type-math .block-content {
+  padding: 7px 10px;
+  margin: 0 var(--content-pad);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Courier New", monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+/* 編集していない間はソースを1pxに畳み、描画結果だけを見せる。
+   display:none にするとキーボードからフォーカスできなくなるため畳むだけにする。
+   開閉は :focus-within ではなく app.js が付ける .source-open クラスで駆動する:
+   クリック時の静的選択モードでフォーカスが一瞬 #blocks へ移るため、疑似クラスだと
+   クリックの最中にソースが畳まれて既定のキャレット配置がずれる(実際に起きた)。 */
+.block.type-math:not(.source-open) .block-content {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.math-canvas {
+  /* .block は 40px+1fr のグリッド。指定が無いと自動配置で 40px のガター列に落ち、
+     プレースホルダが1文字ずつ縦に折り返される(実際に起きた)。本文列に固定する。 */
+  grid-column: 2;
+  margin: 4px 0;
+  padding: 6px 8px;
+  text-align: center;
+  font-size: 1.12em;
+  cursor: pointer;
+}
+.block.type-math.source-open .math-canvas {
+  border-top: 1px dashed var(--line);
+}
+.math-canvas math { display: inline-block; }
+.math-placeholder {
+  color: var(--muted);
+  font-size: 13px;
+}
+.math-error {
+  border-radius: 4px;
+  background: var(--doc-error-bg);
+  color: var(--doc-danger);
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Courier New", monospace;
+  font-size: .92em;
+}
+/* インライン数式(ウィジェット表示)。中身は MathML の描画キャッシュだけで、
+   ソースの真実は data-tex。キャレットが触れている間は app.js のチップエンジンが
+   ウィジェットごと外し、本文には素のテキスト($$tex$$)だけが現れる。
+   編集中のDOMに特殊構造を持たないので、ここに編集用のCSSは存在しない。余白・誤りの色は (document-style.js の SHARED_CSS。エディタと保存HTMLで同じ規則。Issue #201) */
+.inline-math {
+  border-radius: 4px;
+  cursor: text;
+}
+.inline-math:hover { background: var(--accent-soft); }
+
+/* 画面右下のバージョン表示。控えめに常時出す(操作は素通し)。 */
+.version-badge {
+  position: fixed;
+  right: 12px;
+  bottom: 8px;
+  z-index: 3;
+  color: var(--muted);
+  font-size: 11px;
+  opacity: .8;
+  pointer-events: none;
+  user-select: none;
+}
+/* 式のセルは点線の下線で、手で入れた値のセルと見分ける。
+   編集中（フォーカス中）は式そのものが見えているので下線は消す。 */
+.editor-table td.formula-cell, .editor-table th.formula-cell {
+  text-decoration: underline dotted var(--doc-formula-underline);
+  text-underline-offset: 3px;
+}
+.editor-table td.formula-cell:focus, .editor-table th.formula-cell:focus { text-decoration: none; }
+.editor-table td.cell-selected, .editor-table th.cell-selected {
+  background: var(--accent-soft);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+.editor-table th {
+  border: 1px solid var(--line);
+  padding: 7px 9px;
+  background: var(--soft);
+  font-weight: 700;
+  text-align: left;
+  vertical-align: top;
+}
+.block-marquee {
+  position: fixed;
+  z-index: 30;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: var(--accent-soft);
+  opacity: .55;
+  pointer-events: none;
+}
+.block.selected {
+  background: #eef4ff;
+  box-shadow: inset 0 0 0 1px #9bbcff;
+}
+.handle {
+  position: relative;
+  opacity: 0;
+  min-height: 32px;
+}
+.block:hover .handle, .block:focus-within .handle, .block.selected .handle { opacity: 1; }
+.handle button {
+  position: absolute;
+  top: var(--first-line-center);
+  transform: translateY(-50%);
+  width: 16px;
+  min-width: 16px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+.handle .insert-block { left: 0; }
+.handle .drag-grip { left: 20px; cursor: grab; }
+/* つまみと「+」は目立ちすぎないよう Notion と同じくらいの薄さに(v183。ユーザー指示「主張が強すぎるので、色をもう少し薄く」
+   「Notionくらい」「＋も同じ色で」)。ボタンそのものに乗せたときは今までの濃さに戻す。 */
+.handle .drag-grip, .handle .insert-block { color: rgba(55, 53, 47, 0.35); }
+.handle .drag-grip:hover, .handle .insert-block:hover { color: var(--muted); }
+.handle .drag-grip:active { cursor: grabbing; }
+/* v172: 文字の「⋮⋮」は Linux などで 30px ほどになってボタン(16px)からはみ出し、本文の行頭を覆って
+   クリックやドラッグを奪っていた。v174 から図形(ボタンと同じ 16x24 の枠)で描く。はみ出しは念のため切る。 */
+.handle button { display: grid; place-items: center; overflow: hidden; }
+.handle .insert-block .ui-icon { width: 14px; height: 14px; }
+.handle .drag-grip .ui-icon { width: 16px; height: 24px; }
+.block-content {
+  min-height: var(--doc-block-min-height);
+  padding: var(--doc-block-pad) var(--content-pad);
+  line-height: var(--doc-line-height);
+  outline: 0;
+  border-radius: 5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* 本文のタブ文字の幅(v176)。4文字ぶんの位置ごとにそろう。 */
+  tab-size: var(--doc-tab-size);
+}
+/* 空のブロックの案内は、カーソルのあるブロックだけに見せる(v206。ユーザー指示。Notion と同じ)。ほかでは透明にして
+   場所だけ残す: 消すと、クリックで編集の入れ物が切り替わるたびに空の見出しの高さが縮み、画面が跳ねる。 */
+.block-content:empty::before { content: attr(data-placeholder); color: transparent; }
+.block-content:focus:empty::before { color: #a5abb3; }
+/* 見出しの番号(v218。View → 見出しに番号)。番号は本文の文字ではないので、編集領域の data-heading-number を ::before で描く
+   (選べない・キャレットが入らない・block.text や検索に入らない)。番号と名前のあいだは 0.5em(保存HTMLの .heading-number と同じ。P7)。
+   空の見出しでも番号は見せ、案内(Type / …)はフォーカスがあるときだけ ::after で番号の後ろに出す(::before は番号が使うため)。 */
+.block-content[data-heading-number]::before { content: attr(data-heading-number); margin-right: .5em; color: inherit; }
+.block-content[data-heading-number]:focus:empty::before { color: inherit; }
+.block-content[data-heading-number]:focus:empty::after { content: attr(data-placeholder); color: #a5abb3; }
+.block-content:focus { background: #fff; box-shadow: inset 0 0 0 1px var(--accent-soft); }
+/* インラインコードの見た目は (document-style.js の SHARED_CSS。エディタと保存HTMLで同じ規則。Issue #201)。等幅は OS 標準(日本語は等幅フォントに無いことが多く、桁が揃わない。同梱撤去で受け入れた制限)。 */
+.inline-code { cursor: text; }
+.type-heading1 { --first-line-center: 32px; }
+.type-heading1 .block-content,
+.type-toggleHeading1 .block-content { padding-top: var(--doc-heading1-pad); font-size: var(--doc-heading1-size); line-height: var(--doc-heading1-line-height); font-weight: var(--doc-heading1-weight); }
+.type-toggleHeading1 { --first-line-center: 32px; }
+.type-heading2 { --first-line-center: 23.6px; }
+.type-heading2 .block-content,
+.type-toggleHeading2 .block-content { padding-top: var(--doc-heading2-pad); font-size: var(--doc-heading2-size); line-height: var(--doc-heading2-line-height); font-weight: var(--doc-heading2-weight); }
+.type-toggleHeading2 { --first-line-center: 23.6px; }
+.type-heading3 { --first-line-center: 20px; }
+.type-heading3 .block-content,
+.type-toggleHeading3 .block-content { padding-top: var(--doc-heading3-pad); font-size: var(--doc-heading3-size); line-height: var(--doc-heading3-line-height); font-weight: var(--doc-heading3-weight); }
+.type-toggleHeading3 { --first-line-center: 20px; }
+.type-heading4 { --first-line-center: 16.8px; }
+.type-heading4 .block-content,
+.type-toggleHeading4 .block-content { padding-top: var(--doc-heading4-pad); font-size: var(--doc-heading4-size); line-height: var(--doc-heading4-line-height); font-weight: var(--doc-heading4-weight); }
+.type-toggleHeading4 { --first-line-center: 16.8px; }
+.type-heading5 { --first-line-center: 14px; }
+.type-heading5 .block-content,
+.type-toggleHeading5 .block-content { padding-top: var(--doc-heading5-pad); font-size: var(--doc-heading5-size); line-height: var(--doc-heading5-line-height); font-weight: var(--doc-heading5-weight); color: var(--muted); }
+.type-toggleHeading5 { --first-line-center: 14px; }
+.type-quote .block-content { border-left: 3px solid var(--doc-line); padding-left: 14px; color: var(--doc-quote-ink); }
+/* 呼び出し(Issue #161)。色つきの囲み(.block-content。色は下の .block-bg)の左に絵文字のボタン。保存HTMLの .callout と同じ寸法(P7):
+   囲みの内側の余白は上下 10px・右 12px、文は囲みの左端から 44px(絵文字 24px を左 12px・右 8px の間で置く)。
+   上下は 4px ずつ空ける(行どうしの 2px の代わり)。つまみの縦の位置は1行目の中心(10px + 22.5px / 2)。 */
+.block.type-callout { --first-line-center: 21.25px; margin-top: 4px; margin-bottom: 4px; }
+.type-callout > .block-content { padding: 10px 12px 10px 44px; }
+.callout-icon {
+  position: absolute;
+  left: calc(40px + 4px + 12px);
+  top: 9.25px;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  font-size: 18px;
+  line-height: 24px;
+  text-align: center;
+  user-select: none;
+}
+.callout-icon:hover { background: rgba(55, 53, 47, .08); }
+.callout-icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* 絵文字を選ぶ一覧(呼び出しの絵文字のボタンから開く)。8 列。 */
+.popover.callout-icon-picker { width: auto; display: grid; grid-template-columns: repeat(8, 32px); gap: 2px; }
+.popover.callout-icon-picker[hidden] { display: none; }
+.callout-icon-choice { width: 32px; min-width: 32px; height: 32px; min-height: 32px; padding: 0; border-color: transparent; background: transparent; font-size: 18px; line-height: 1; }
+.callout-icon-choice:hover, .callout-icon-choice:focus-visible { background: var(--soft); outline: 0; }
+.callout-icon-choice[aria-checked="true"] { background: var(--accent-soft); }
+/* ブロックの色(Issue #162)。値は app.js が行の --block-fg・--block-bg に入れる(fmt.blockColorOf。保存HTMLと同じ値)。
+   文字の色は本文と印(点・番号・三角)に、背景の色は本文の箱(.block-content。印も中に入る)に。編集中も背景は白にしない。
+   済んだ ToDo の薄い色(下の .is-done)はこの後ろに置いて勝たせる(保存HTMLの .todo.done と同じ)。 */
+.block.block-fg > .block-content,
+.block.block-fg > .bullet-marker,
+.block.block-fg > .numbered-marker,
+.block.block-fg > .toggle-caret { color: var(--block-fg); }
+.block.block-bg > .block-content,
+.block.block-bg > .block-content:focus { background: var(--block-bg); }
+/* リストの本文は「マーカーの幅 + 間隔」だけ右へ出す。マーカーの左端が本文カラムの
+   左端(= 通常段落の本文左端)に来るので、本文はその右隣に並ぶ。数値は書かず、
+   マーカーの幅の変数から計算する(幅を変えれば本文も自動でついてくる)。
+   引用(.type-quote)は border-left の意匠があるため対象外。 */
+.type-toggle .block-content,
+.type-toggleHeading1 .block-content,
+.type-toggleHeading2 .block-content,
+.type-toggleHeading3 .block-content,
+.type-toggleHeading4 .block-content,
+.type-toggleHeading5 .block-content {
+  padding-left: calc(var(--content-pad) + var(--toggle-marker-width) + var(--marker-text-gap));
+}
+.type-bullet .block-content {
+  padding-left: calc(var(--content-pad) + var(--bullet-marker-width) + var(--marker-text-gap));
+}
+.type-todo .block-content {
+  padding-left: calc(var(--content-pad) + var(--todo-marker-width) + var(--marker-text-gap));
+}
+/* 済んだ ToDo(v188)。保存HTMLの .todo.done(取り消し線・#6b7078)と同じ。 */
+.type-todo.is-done .block-content { text-decoration: line-through; color: var(--muted); }
+.type-numbered .block-content {
+  padding-left: calc(var(--content-pad) + var(--number-marker-width, var(--doc-number-width)) + var(--marker-text-gap));
+}
+.toggle-caret {
+  position: absolute;
+  /* 三角は図形(SVG。.toggle-caret .ui-icon の大きさ)で描く(v174)。箱は当たり判定で、絵とは別物。
+     v124 ではガターのドラッグ用グリップ(20..36px)と食い合って 14px まで縮めていたが、
+     マーカーが本文カラム内(50px〜)へ移ったので重ならなくなり、24px を確保できる。
+     縦位置は従来どおり --first-line-center + translateY(-50%) で1行目の中心。
+     三角の絵の左端は箱の左端なので、箱の左端 = 本文の左端でそのまま揃う。 */
+  left: var(--marker-area-left);
+  top: var(--first-line-center);
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  /* 左端をそろえるのが目的なので、箱の中でも絵を左へ寄せる。 */
+  justify-content: flex-start;
+  width: var(--toggle-marker-width);
+  min-width: var(--toggle-marker-width);
+  height: 30px;
+  min-height: 30px;
+  overflow: visible;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  line-height: 1;
+}
+/* 三角の大きさ。以前の 28px の ▸/▾ と同じくらい(v109 で約2倍にした大きさ)。 */
+.toggle-caret .ui-icon { width: 14px; height: 14px; }
+.bullet-marker {
+  position: absolute;
+  /* 点は円(.bullet-dot)で描く(v174)。大きさは以前の 28px の「•」と同じくらい(v111 で約2倍にした大きさ)。
+     飾りなのでクリックは下へ抜かす(本文カラム内に入るため、本文のクリックを邪魔しない)。 */
+  pointer-events: none;
+  left: var(--marker-area-left);
+  top: var(--first-line-center);
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: var(--bullet-marker-width);
+  height: 28px;
+  color: var(--muted);
+  user-select: none;
+}
+.bullet-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.numbered-marker {
+  position: absolute;
+  /* 番号は桁で幅が変わる(1. / 1.1 / 1.1.1)。**左端**をそろえるので左揃えにし、
+     伸びるぶんは右へ出す。本文の padding-left も同じ --number-marker-width を見るので、
+     番号が長い行では本文もそのぶん右へ動く(番号と本文が重ならない)。
+     飾りなのでクリックは下へ抜かす。 */
+  pointer-events: none;
+  left: var(--marker-area-left);
+  top: var(--first-line-center);
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: var(--number-marker-width, var(--doc-number-width));
+  line-height: 1;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  user-select: none;
+}
+.todo-box {
+  position: absolute;
+  left: var(--marker-area-left);
+  top: var(--first-line-center);
+  transform: translateY(-50%);
+  width: var(--todo-marker-width);
+  height: 16px;
+  margin: 0;
+  /* 箱は図形(保存HTMLの .todo-mark と同じ絵。app.js が --todo-icon に入れる)。OS 標準の見た目にしない(v190)。 */
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  border-radius: 3px;
+  background: var(--todo-icon) center / contain no-repeat;
+  cursor: pointer;
+}
+.todo-box:checked { background-image: var(--todo-icon-checked); }
+.todo-box:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.type-code { --first-line-center: 20.8px; }
+.type-code .block-content {
+  /* 枠(背景)の左右を本文の文字の頭・表の端にそろえる(v186)。 */
+  margin: 0 var(--content-pad);
+  padding: 10px 12px;
+  background: var(--doc-code-bg);
+  /* 等幅は OS 標準。日本語は等幅フォントに無いことが多く、本文書体へ落ちて桁が揃わない（同梱撤去で受け入れた制限）。 */
+  font-family: var(--doc-mono);
+}
+/* コードの言語(Issue #163)。本文の外(.block の直下。P11)で、コードの箱の右上に重ねる。ふだんは隠し、行に乗ったとき・コードに
+   キャレットがあるとき・一覧を開いているときだけ出す(Notion と同じ。1行目の右端の文字を常には隠さない)。地はコードの箱と同じ色。
+   字句の色(::highlight(code-…))は app.js が document-style.js の表から作る(保存HTMLの .tok-… と同じ値)。 */
+.code-lang-button {
+  grid-column: 2;
+  position: absolute;
+  top: 4px;
+  right: calc(var(--content-pad) + 4px);
+  z-index: 1;
+  min-height: 0;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--doc-code-bg);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+  visibility: hidden;
+}
+.type-code:hover > .code-lang-button,
+.type-code:focus-within > .code-lang-button,
+.code-lang-button[aria-expanded="true"] { visibility: visible; }
+.code-lang-button:hover, .code-lang-button[aria-expanded="true"] { background: #e3e6e9; color: var(--ink); }
+.page-locked .code-lang-button { cursor: default; }
+.popover.code-lang-picker { width: min(240px, calc(100vw - 24px)); padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+.popover.code-lang-picker[hidden] { display: none; }
+.code-lang-filter { box-sizing: border-box; width: 100%; padding: 8px 10px; border: 0; border-bottom: 1px solid var(--line); outline: 0; background: var(--surface); font: inherit; font-size: 13px; }
+.code-lang-list { overflow-y: auto; max-height: min(280px, calc(100vh - 80px)); padding: 4px; }
+.code-lang-choice { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 28px; padding: 4px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; text-align: left; }
+.code-lang-choice:hover { background: rgba(0, 0, 0, .04); }
+.code-lang-choice.active { background: var(--accent-soft); }
+.code-lang-check { color: var(--accent); font-weight: 700; }
+.type-divider .block-content {
+  min-height: 28px;
+  padding: 12px 6px;
+}
+/* 区切り線(---)の濃さ(v185。ユーザー指示「もう少し濃く」。以前は var(--line) #dcdee3)。保存HTMLの hr も同じ値。 */
+/* 改ページ(v192)。エディタだけの印: 点線の真ん中に「改ページ」。印刷・PDF ではここで紙を改める(保存HTMLの @media print)。 */
+.type-pagebreak .block-content { min-height: 28px; padding: 6px var(--content-pad); }
+.page-break-mark { position: relative; display: flex; align-items: center; justify-content: center; height: 16px; color: var(--muted); font-size: 11px; user-select: none; }
+.page-break-mark::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 1px dashed var(--doc-rule); }
+.page-break-mark > span { position: relative; padding: 0 8px; background: var(--bg); }
+.type-divider hr {
+  border: 0;
+  border-top: 1px solid var(--doc-rule);
+  margin: 0;
+}
+.type-toc {
+  --first-line-center: 22px;
+}
+.type-toc:hover { background: transparent; }
+.type-toc .block-content {
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--doc-toc-line);
+  border-left: 3px solid var(--doc-toc-accent);
+  border-radius: 6px;
+  background: var(--doc-toc-bg);
+  box-shadow: 0 1px 2px var(--doc-shadow-faint);
+}
+.toc-block {
+  display: grid;
+  gap: 2px;
+  padding: 10px;
+}
+.toc-title {
+  margin-bottom: 3px;
+  padding: 0 8px 8px;
+  border-bottom: 1px solid var(--doc-toc-title-line);
+  color: var(--doc-toc-title);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.toc-item {
+  display: flex;
+  justify-content: flex-start;
+  width: 100%;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--doc-toc-ink);
+  height: 30px;
+  min-height: 30px;
+  padding: 0 8px;
+  text-align: left;
+}
+.toc-item:hover { background: var(--doc-toc-hover); }
+.toc-item:focus-visible {
+  outline: 2px solid #9bbcff;
+  outline-offset: -2px;
+}
+.toc-item.level-1 { padding-left: 8px; font-weight: 650; }
+.toc-item.level-2 { padding-left: 22px; }
+.toc-item.level-3 { padding-left: 36px; }
+.toc-item.level-4 { padding-left: 50px; }
+.toc-item.level-5 { padding-left: 64px; color: var(--muted); }
+/* 目次の見出しの番号(v218)。保存HTMLの .toc-number と同じ間。 */
+.toc-item-number { flex: none; margin-right: .5em; font-variant-numeric: tabular-nums; }
+.toc-empty { color: var(--muted); padding: 6px 8px 2px; }
+.block.dragging { opacity: .45; }
+.block.drop-before::before,
+.block.drop-after::after {
+  content: "";
+  position: absolute;
+  left: 34px;
+  right: 6px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 999px;
+}
+.block.drop-before::before { top: -2px; }
+/* 「後ろへ」の線を子の行の下に出すとき(v221)は、相手の字下げの位置から引く(--drop-outdent は字下げの差。app.js)。 */
+.block.drop-after::after { bottom: -2px; left: calc(34px - var(--drop-outdent, 0px)); }
+.block.drop-left::before,
+.block.drop-right::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  top: 2px;
+  bottom: 2px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--accent);
+}
+.block.drop-left::before { left: 32px; }
+.block.drop-right::after { right: 2px; }
+.editor-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  table-layout: fixed;
+}
+/* 列幅をドラッグで決めた表。幅は colgroup の px が支配し、表全体の幅は
+   列幅の合計になる(隣の列に波及しない独立リサイズ。Excel と同じ)。
+   td の min-width:96px は colgroup より強く効いてしまうため外す
+   (最小幅は JS 側の TABLE_MIN_COLUMN_WIDTH=48px で保証する)。 */
+.editor-table.col-sized { width: auto; }
+.editor-table.col-sized td, .editor-table.col-sized th { min-width: 0; }
+/* 列幅セパレータ。列の右端に重ねる細い縦帯(.block 直下の絶対配置)。ドラッグ/
+   ダブルクリック(自動調整)/フォーカスして矢印キーで幅を変える。 */
+.table-col-resizer {
+  position: absolute;
+  width: 7px;
+  transform: translateX(-50%);
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 4;
+  border-radius: 3px;
+}
+.table-col-resizer:hover, .table-col-resizer.resizing, .table-col-resizer:focus-visible {
+  background: rgba(11, 107, 203, .28);
+}
+.editor-table td {
+  min-width: 96px;
+  min-height: 34px;
+  border: 1px solid var(--line);
+  padding: 7px 9px;
+  outline: 0;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+.editor-table td:focus {
+  background: #fff;
+  box-shadow: inset 0 0 0 2px var(--accent-soft);
+}
+.attachment-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px 12px;
+}
+.attachment-file-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.attachment-details { min-width: 0; }
+.attachment-name { font-weight: 700; }
+.attachment-meta { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.attachment-meta:has(.attachment-remove) { display: flex; align-items: center; gap: 6px; }
+.attachment-meta > span { flex: 1; min-width: 0; }
+.attachment-remove { flex: none; width: 26px; min-width: 26px; min-height: 26px; padding: 0; border-color: transparent; background: transparent; color: var(--muted); }
+.attachment-remove:hover { background: var(--soft); color: var(--ink); }
+.attachment-remove .ui-icon { width: 15px; height: 15px; }
+.attachment-download { flex: 0 0 auto; }
+.image-attachment-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 2px 0 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+}
+.image-attachment-card[data-align="center"] { align-items: center; }
+.image-attachment-card[data-align="right"] { align-items: flex-end; }
+.image-attachment-stage {
+  position: relative;
+  max-width: 100%;
+  overflow: visible;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--doc-media-bg);
+}
+.attachment-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+/* 再生できなかった動画(v273)。ファイルのカードに、何が起きたかの一言を足す(自分で「ファイルとして表示」にしたのと区別する)。 */
+.attachment-unplayable-note {
+  margin-top: 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--doc-notice-line);
+  border-radius: 6px;
+  background: var(--doc-notice-bg);
+  color: var(--doc-notice-ink);
+  font-size: 12.5px;
+}
+/* 動画(v273)。画像と同じ枠で、黒地のプレーヤー。 */
+.attachment-video {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+  background: var(--doc-video-bg);
+}
+/* 音声(Issue #164 の音声)。ファイルのカード(名前・大きさ・Download)の下の段に、幅いっぱいのプレーヤー(保存HTMLの .audio-attachment と同じ)。 */
+.audio-attachment-card { flex-wrap: wrap; }
+.audio-attachment-card > .attachment-details { flex: 1 1 0; }
+.attachment-audio { display: block; flex: 1 0 100%; width: 100%; height: 40px; }
+@media print { .attachment-audio { display: none; } }
+/* PDF(v277)。見本は1ページ目をページの形(A4 の縦横)で小さく見せ、押すと大きく開く(枠の中は操作させない)。
+   中で読むは低い枠の中でページをスクロールする。どちらも PDF ビューアの上の帯は出さない(fmt.PDF_VIEW_HASH)。 */
+.attachment-pdf-frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  background: #fff;
+}
+.pdf-attachment-card[data-pdf-view="preview"] .attachment-pdf-frame {
+  aspect-ratio: 1 / 1.414;
+  pointer-events: none;
+}
+.pdf-attachment-card[data-pdf-view="preview"] .image-attachment-stage { cursor: zoom-in; }
+/* 中で読むの高さは fmt.pdfReadHeight(style で入れる)。下の端のつまみは表の高さのつまみと同じ見た目で、マウスを乗せると出る(v277) */
+.pdf-attachment-card[data-pdf-view="read"] .attachment-pdf-frame { height: 300px; }
+.pdf-height-grip { grid-column: auto; }
+.pdf-attachment-card .image-attachment-stage:hover > .pdf-height-grip,
+.image-attachment-stage.is-resizing-height > .pdf-height-grip { opacity: 1; }
+.image-attachment-stage.is-resizing-height .table-height-bar { background: var(--doc-chart-axis); }
+.page-locked .pdf-height-grip { display: none; }
+.attachment-pdf-hint {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--doc-overlay-hint);
+  color: #fff;
+  font-size: 12px;
+  pointer-events: none;
+}
+.image-resize-handle {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  width: 16px;
+  outline: 0;
+  cursor: ew-resize;
+  touch-action: none;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .12s ease;
+}
+.image-resize-handle.is-left { left: -8px; }
+.image-resize-handle.is-right { right: -8px; }
+.image-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 6px;
+  width: 4px;
+  height: 44px;
+  max-height: calc(100% - 12px);
+  border-radius: 3px;
+  background: #fff;
+  box-shadow: 0 0 0 1px #8ba9c7, 0 2px 8px rgba(32, 33, 36, .16);
+  transform: translateY(-50%);
+}
+.image-attachment-card[data-align="left"] .image-resize-handle.is-left,
+.image-attachment-card[data-align="right"] .image-resize-handle.is-right { display: none; }
+.block.selected .image-resize-handle,
+.image-resize-handle:focus-visible,
+.image-resizing .image-resize-handle,
+/* 動画(v273)は、押すと再生になってブロックを選べない(画像は押すと選ばれてバーが出る)。マウスを乗せたらバーを出す。PDF(v277)も同じ。 */
+.video-attachment-card .image-attachment-stage:hover .image-resize-handle,
+.pdf-attachment-card .image-attachment-stage:hover .image-resize-handle {
+  opacity: 1;
+  pointer-events: auto;
+}
+.image-resize-handle:focus-visible::after { box-shadow: 0 0 0 2px var(--accent), 0 2px 8px rgba(32, 33, 36, .16); }
+.image-attachment-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+}
+.block:not(.selected) .image-attachment-caption { display: none; }
+.image-attachment-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.image-align-control {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.image-align-button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  min-width: 32px;
+  min-height: 30px;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  color: var(--muted);
+}
+.align-icon {
+  display: block;
+  fill: currentColor;
+}
+.image-align-button + .image-align-button { border-left: 1px solid var(--line); }
+.image-align-button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.image-lightbox {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  overflow: hidden;
+  background: var(--doc-overlay);
+  /* 見る位置はドラッグで動かす(2026-10-23。fmt.attachZoomPan)。文字の選択やブラウザのつまみ操作をさせない */
+  user-select: none;
+  touch-action: none;
+}
+.image-lightbox.is-pannable { cursor: grab; }
+/* PDF を大きく開いたところ(v277)。倍率の道具は使わない(PDF ビューアの帯で拡大する) */
+.image-lightbox.is-pdf .image-lightbox-bar { display: none; }
+.image-lightbox-pdf {
+  width: min(1000px, 92vw);
+  height: calc(100vh - 96px);
+  border: 0;
+  border-radius: 6px;
+  background: var(--doc-pdf-viewer-bg);
+  box-shadow: 0 18px 60px var(--doc-overlay-shadow);
+}
+.image-lightbox-pdf[hidden],
+.image-lightbox-title[hidden] { display: none; }
+.image-lightbox-title {
+  position: absolute;
+  top: 22px;
+  left: 24px;
+  right: 80px;
+  overflow: hidden;
+  color: #fff;
+  font-size: 14px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.image-lightbox.is-dragging { cursor: grabbing; }
+/* Mermaid の図・グラフは透明な地に描いてあるので、紙と同じ白い地に置く */
+.image-lightbox-svg {
+  overflow: hidden;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 18px 60px var(--doc-overlay-shadow);
+}
+.image-lightbox-svg[hidden] { display: none; }
+.image-lightbox-svg svg { display: block; }
+.image-lightbox-image[hidden] { display: none; }
+/* 倍率の道具(右上。閉じるボタンの左) */
+.image-lightbox-bar {
+  position: absolute;
+  z-index: 1;
+  top: 16px;
+  right: 64px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  border: 1px solid var(--doc-overlay-line);
+  border-radius: 8px;
+  /* 拡大した明るい画像の上でも読めるよう、透かさない */
+  background: var(--doc-overlay-panel);
+  color: #fff;
+}
+.image-lightbox-tool {
+  display: grid;
+  place-items: center;
+  min-width: 32px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: #fff;
+  font-size: 13px;
+}
+.image-lightbox-tool:hover { background: var(--doc-overlay-hover); }
+.image-lightbox-tool:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
+.image-lightbox-tool .ui-icon { width: 18px; height: 18px; }
+.image-lightbox-level {
+  min-width: 46px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.image-lightbox[hidden] { display: none; }
+.image-lightbox-image {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 64px);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 18px 60px var(--doc-overlay-shadow);
+}
+.image-lightbox-close {
+  position: absolute;
+  z-index: 1;
+  top: 16px;
+  right: 16px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-color: var(--doc-overlay-line);
+  background: var(--doc-overlay-panel);
+  color: #fff;
+  font-size: 24px;
+  line-height: 1;
+}
+.image-lightbox-close:hover { background: #3c4043; }
+.image-lightbox-close:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+body.image-lightbox-open { overflow: hidden; }
+/* メニュー類(.popover と、書体・大きさ・色の一覧)は横の欄(表の帯 23・グラフの設定欄 24・提案の欄と目次のオーバーレイ・検索の帯 25)より上(26)。
+   以前は 20 で、提案の欄を開いたまま表の絞り込みを開くとメニューが欄の下に隠れた(Issue #243)。書体・大きさ・色の一覧は上の道具の帯
+   (.toolbar の z-index 5)の中にあるので、一覧が開いている間だけ帯ごと 26 に上げる(.toolbar:has(...))。 */
+.popover {
+  position: fixed;
+  z-index: 26;
+  width: min(360px, calc(100vw - 24px));
+  max-height: min(340px, calc(100vh - 24px));
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 6px;
+}
+.popover[hidden] { display: none; }
+/* リンク(v200)。本文のリンクは青の下線。開くのは Ctrl+クリック(ふつうのクリックは文字の編集)。 */
+.block-content a[href] { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.link-open-mode .block-content a[href] { cursor: pointer; }
+.link-popover { width: min(340px, calc(100vw - 24px)); padding: 10px; display: grid; gap: 8px; }
+.link-popover[hidden] { display: none; }
+.link-url { width: 100%; min-width: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+.link-url:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.link-popover-actions { display: flex; gap: 6px; }
+.link-apply { border-color: var(--accent); background: var(--accent); color: #fff; }
+.link-remove[hidden], .link-popover-error[hidden] { display: none; }
+.link-popover-error { color: var(--warn); font-size: 12px; }
+/* 本文の幅(v260)。表示メニューから出す小さな窓。 */
+.content-width-popover { width: min(320px, calc(100vw - 24px)); padding: 12px; display: grid; gap: 10px; }
+.content-width-popover[hidden] { display: none; }
+.content-width-head { font-size: 13px; font-weight: 600; color: var(--ink); }
+.content-width-value { margin-left: 6px; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+.content-width-range { width: 100%; accent-color: var(--accent); }
+.content-width-actions { display: flex; gap: 6px; }
+.content-width-note { color: var(--muted); font-size: 11.5px; }
+/* 文字数(Issue #189)。編集メニューから出す小さな窓と、つまみのメニューの下の一行。 */
+.count-popover { width: min(320px, calc(100vw - 24px)); padding: 12px; display: grid; gap: 8px; }
+.count-popover[hidden] { display: none; }
+.count-head { font-size: 13px; font-weight: 600; color: var(--ink); }
+.count-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.count-table th, .count-table td { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.count-table thead th { color: var(--muted); font-size: 11.5px; font-weight: 400; }
+.count-table tbody th { text-align: left; font-weight: 400; color: var(--ink); white-space: normal; }
+.count-table tbody td:nth-child(2) { font-weight: 600; }
+.count-note { color: var(--muted); font-size: 11.5px; }
+/* ライセンス情報(Issue #234)。File メニューから出す窓。要約・3つの見出し・全文(長いので窓の中でスクロール)。 */
+.license-popover { width: min(640px, calc(100vw - 24px)); max-height: min(80vh, 640px); padding: 12px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+.license-popover[hidden] { display: none; }
+.license-head { font-size: 13px; font-weight: 600; color: var(--ink); }
+.license-summary { font-size: 12.5px; line-height: 1.6; color: var(--ink); overflow-wrap: anywhere; }
+.license-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.license-tab { padding: 4px 8px; font-size: 12px; }
+.license-tab.is-active { border-color: var(--accent); background: var(--accent-soft); }
+.license-text { flex: 1 1 auto; min-height: 120px; margin: 0; padding: 8px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font: 11.5px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.license-actions { display: flex; justify-content: flex-end; }
+.menu-footer { margin-top: 4px; padding: 7px 8px 2px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.menu-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  gap: 8px;
+  align-items: center;
+  border-color: transparent;
+  text-align: left;
+}
+.menu-item.active { background: var(--accent-soft); }
+/* ハンドルのメニューだけに要るもの。見た目の流儀(.popover/.menu-item)は
+   ＋・スラッシュのメニューと共通で、ここでは増やさない(P20)。 */
+.block-menu-search {
+  position: sticky;
+  top: -6px;
+  z-index: 1;
+  width: 100%;
+  margin: -6px 0 4px;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  outline: 0;
+  background: var(--surface);
+  font: inherit;
+}
+.menu-section {
+  padding: 8px 8px 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+/* いま何のブロックかは、変換の一覧より先に分かる必要がある(Notion と同じ位置)。 */
+.menu-current { padding: 6px 8px 0; color: var(--muted); font-size: 12px; }
+.menu-check { margin-left: auto; color: var(--accent); font-weight: 700; }
+.menu-item.has-check { grid-template-columns: 30px 1fr auto; }
+.menu-empty {
+  padding: 16px 12px;
+  color: var(--muted);
+  text-align: center;
+}
+.menu-icon {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  border-radius: 5px;
+  background: var(--soft);
+  color: var(--muted);
+  font-weight: 700;
+}
+/* ブロックの色の一覧の見本(Issue #162)。文字の色は「A」の色、背景の色は箱の地(app.js が style に入れる)。 */
+.menu-icon.color-swatch-icon { color: var(--ink); background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); font-size: 14px; }
+.menu-title { font-weight: 650; }
+.menu-desc { color: var(--muted); font-size: 12px; }
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: start center;
+  padding-top: 12vh;
+  background: rgba(32,33,36,.18);
+}
+.palette-backdrop[hidden] { display: none; }
+.palette {
+  width: min(560px, calc(100vw - 24px));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.palette input {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  outline: 0;
+  padding: 14px 16px;
+}
+.palette-results { padding: 6px; }
+@media (max-width: 800px) {
+  .format-toolbar { width: 100%; }
+  .image-lightbox { padding: 16px; }
+  .image-lightbox-image { max-height: calc(100vh - 32px); }
+}
+@media (max-width: 700px) {
+  .column-layout { display: block; }
+  .column { padding: 0; }
+  .column-resizer + .column {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--doc-faint-line);
+  }
+  .column-resizer { display: none; }
+}
+
+/* ---- 文書内検索・置換 ---- */
+/* ツールバーが position: sticky なので absolute の基準になる。ツールバー直下の
+   右端へ浮かべ、スクロールしてもヘッダーと一緒に付いてくる。 */
+.search-bar {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 18px;
+  z-index: 25;
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .16);
+}
+/* hidden 属性での開閉。author 側の display 指定は UA 既定の [hidden]{display:none}
+   に勝ってしまうため、対の規則が無いと閉じても消えない(他のポップアップ
+   .menu-panel[hidden] などと同じ流儀)。 */
+.search-bar[hidden],
+.search-row[hidden] {
+  display: none;
+}
+.search-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.search-text {
+  width: 200px;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+.search-text:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.search-count {
+  min-width: 44px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+  white-space: nowrap;
+}
+.search-button {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.search-button:hover { background: var(--soft); }
+.search-action {
+  min-height: 28px;
+  padding: 2px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+  cursor: pointer;
+}
+.search-action:hover { background: var(--soft); }
+/* 検索の範囲(このページ/このページと子ページ/全ページ)と、今の一致があるページの名前。 */
+.search-scope {
+  min-height: 28px;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+.search-scope:focus { border-color: var(--accent); outline: none; }
+.search-page {
+  min-width: 0;
+  max-width: 240px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 一致箇所は CSS Custom Highlight API で塗る。本文の DOM に装飾要素を挿し込むと
+   textContent がキャレット計算・シリアライズを壊すため、DOM には触らない。 */
+::highlight(doc-search-match) { background-color: rgba(255, 202, 40, .45); }
+::highlight(doc-search-current) {
+  background-color: #f9a825;
+  color: var(--doc-ink);
+}
+/* 狭い画面では右端寄せの固定幅だと左へはみ出すため、左右いっぱいに広げて
+   入力欄を伸縮させる。 */
+@media (max-width: 520px) {
+  /* 帯はメニュー列の最小幅で画面より広がり(360px の画面で 376px)、帯の右端に寄せた検索バーが
+     画面の外へはみ出していた(v213)。帯を画面の幅に収める(はみ出る分は .main の clip で切れるのは前と同じ)。 */
+  .toolbar { min-width: 0; }
+  /* メニューの帯も、入りきらなければ次の行へ折り返す(書式の帯と同じ)。Linux では OS の書体(system-ui)が幅の広い
+     DejaVu Sans になり、360px の画面で File・Edit・View・Attach Files が 5px はみ出して、本文の欄が横に動いた(v278)。 */
+  .menubar { flex-wrap: wrap; }
+  .search-bar {
+    left: 12px;
+    right: 12px;
+  }
+  /* 行(バーの grid の項目)が中身の最小幅(入力欄の既定の幅)で広がらないようにする。広がると行がバーの外へ
+     はみ出し、閉じる(×)・すべて置換が画面の外に出ていた(v213)。さらに狭いときは折り返す。 */
+  .search-row {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+  .search-text {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+  }
+}
+/* 数式セルの一致は式文字列に対するもので、表示中の計算値には塗る範囲が無い。
+   代わりにセルの枠線で示す。 */
+.editor-table .search-match-cell {
+  outline: 2px dashed rgba(249, 168, 37, .6);
+  outline-offset: -2px;
+}
+.editor-table .search-current-cell {
+  outline: 2px solid #f9a825;
+  outline-offset: -2px;
+}
+
+/* ---- グラフ設定GUI(右ペイン) ---- */
+/* ペインの幅と画面端からの間。本文の列の右に空ける幅(下の .chart-pane-reserved)もこの値から決める。 */
+:root {
+  --chart-pane-width: 268px;
+  --chart-pane-gap: 12px;
+}
+.chart-pane {
+  position: fixed;
+  top: 128px;
+  right: var(--chart-pane-gap);
+  z-index: 24;
+  width: var(--chart-pane-width);
+  max-height: calc(100vh - 152px);
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .16);
+}
+/* author 側の display 指定は UA の [hidden]{display:none} に勝つため、対の規則を書く
+   (検索バーで踏んだ罠と同じ)。 */
+.chart-pane[hidden] { display: none; }
+
+/* ---- 提案(v240。ユーザー選択: 右に一覧の木・本文に差分) ----
+   消える所は赤の取り消し線、増える所は緑。足すブロックは薄い緑の仮の行、消すブロックは薄い赤。選びから外した所は薄く見せる。 */
+.sg-del { background: #fde7e9; color: #a3262f; text-decoration: line-through; text-decoration-color: #c9404a; border-radius: 3px; }
+.sg-ins { background: #e3f4e6; color: #17663a; border-radius: 3px; }
+.sg-done { border-bottom: 2px solid #3aa35b; }
+.sg-del.sg-off, .sg-ins.sg-off { background: none; color: inherit; opacity: .55; }
+/* 段落ごとの書き換えの新しい側のリンク(v242)。押しても移らない印にし、行き先を横に小さく書く。 */
+.sg-ins .sg-link { text-decoration: underline; }
+.sg-ins .sg-href { margin-left: 2px; color: var(--muted); font-size: .85em; }
+.sg-ins.sg-off { text-decoration: line-through; }
+.sg-del.sg-off { text-decoration: none; }
+.block.sg-block-ins > .block-content, .block.sg-block-ins .editor-table { background: #eef8f0; box-shadow: inset 3px 0 0 #3aa35b; }
+.block.sg-block-del > .block-content { background: #fdf1f2; box-shadow: inset 3px 0 0 #d24b55; color: #a3262f; text-decoration: line-through; }
+.block.sg-off > .block-content { opacity: .55; text-decoration: none; }
+.editor-table td.sg-cell, .editor-table th.sg-cell { background: #e9f6ec; box-shadow: inset 0 0 0 1px #8fcf9f; }
+.editor-table .sg-cell .sg-old { color: #a3262f; text-decoration: line-through; margin-right: 6px; font-size: .92em; }
+.editor-table .sg-cell.sg-off { background: none; box-shadow: none; }
+.editor-table .sg-cell.sg-off .sg-old { color: inherit; text-decoration: none; margin: 0; font-size: 1em; }
+.editor-table .sg-cell.sg-off .sg-new { display: none; }
+.block.sg-flash > .block-content, .block.sg-flash .editor-table { animation: sg-flash 1.2s ease-out; }
+@keyframes sg-flash { 0% { outline: 3px solid #b9a8ef; } 100% { outline: 3px solid transparent; } }
+.suggest-toggle { margin-left: auto; border: 1px solid #c9bdf0; background: #f6f3fe; color: #4b2fa8; border-radius: 6px; padding: 3px 10px; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.suggest-toggle[aria-pressed="true"] { background: #e9e2fc; }
+.suggest-toggle[hidden] { display: none; }
+.suggest-pane { position: fixed; top: 96px; right: 0; bottom: 0; z-index: 25; width: 320px; overflow-y: auto; padding: 12px 14px 24px; border-left: 1px solid var(--line); background: #fbfbfc; font-size: 13px; }
+.suggest-pane[hidden] { display: none; }
+.app.suggest-pane-reserved .doc { padding-right: calc(22px + 320px); }
+.sg-pane-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+.sg-pane-sub { color: var(--muted); font-size: 12px; }
+.sg-pane-close { margin-left: auto; border: 0; background: none; font-size: 16px; color: var(--muted); cursor: pointer; }
+.sg-section { background: #fff; border: 1px solid var(--doc-toc-line); border-radius: 10px; padding: 10px 11px; margin-bottom: 10px; }
+.sg-who { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.sg-dot { width: 18px; height: 18px; border-radius: 50%; background: #d9822b; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex: none; }
+.sg-dot.sg-kind-ai { background: #7b5cd6; }
+.sg-dot.sg-kind-tool { background: var(--doc-muted); }
+.sg-title { margin-top: 6px; font-weight: 600; }
+.sg-reason { margin-top: 3px; color: var(--muted); font-size: 12px; line-height: 1.5; white-space: pre-wrap; }
+.sg-tree, .sg-tree ul { list-style: none; margin: 0; padding: 0; }
+.sg-tree { margin-top: 8px; }
+.sg-tree ul { padding-left: 18px; margin-left: 8px; border-left: 1px solid #e3e6ea; }
+.sg-node { display: flex; align-items: center; gap: 5px; padding: 2px 3px; border-radius: 6px; }
+.sg-node:hover { background: #f1f3f5; }
+.sg-twisty { width: 14px; height: 18px; min-height: 0; border: 0; background: none; padding: 0; color: #8a9099; font-size: 10px; cursor: pointer; flex: none; }
+.sg-twisty:disabled { cursor: default; }
+.sg-box { width: 15px; height: 15px; min-width: 15px; min-height: 15px; box-sizing: border-box; padding: 0; border-radius: 4px; border: 1.5px solid #8a9099; background: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1; cursor: pointer; flex: none; }
+.sg-box-on { background: #3aa35b; border-color: #3aa35b; color: #fff; }
+.sg-box-part { border-color: #3aa35b; color: #3aa35b; }
+.sg-box:disabled { opacity: .4; cursor: default; }
+.sg-label { flex: 1; min-width: 0; min-height: 0; height: auto; border: 0; background: none; padding: 1px 2px; text-align: left; font: inherit; color: var(--ink); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sg-count { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.sg-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 9px; }
+.sg-actions-label { color: var(--muted); font-size: 12px; margin-right: 2px; }
+.sg-btn { border: 1px solid #cfd4da; background: #fff; border-radius: 6px; padding: 3px 9px; font: inherit; font-size: 12px; color: var(--ink); cursor: pointer; }
+.sg-btn.ok { border-color: #3aa35b; color: #17663a; }
+.sg-btn.ng { border-color: #d24b55; color: #a3262f; }
+.sg-btn:disabled { opacity: .45; cursor: default; }
+.sg-popup, .sg-range-bar { position: absolute; z-index: 60; display: flex; align-items: center; gap: 6px; background: #fff; border: 1px solid #d7dce2; border-radius: 8px; padding: 4px 8px; box-shadow: 0 4px 14px rgba(32, 33, 36, .14); font-size: 12px; }
+.sg-popup[hidden] { display: none; }
+@media print { .suggest-pane, .suggest-toggle, .sg-popup, .sg-range-bar { display: none !important; } }
+/* 文書チェック(Issue #236)。提案のパネルと同じ右のパネル(.suggest-pane の置き場・幅・地)に、結果の見出しと問題の一覧。 */
+.app.check-pane-reserved .doc { padding-right: calc(22px + 320px); }
+.ck-summary { border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; background: var(--surface); }
+.ck-summary-title { font-weight: 600; font-size: 14px; }
+.ck-summary-sub { margin-top: 3px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.ck-summary.ck-ok { border-color: var(--doc-ok); }
+.ck-summary.ck-ok .ck-summary-title { color: var(--doc-ok); }
+.ck-summary.ck-issues { border-color: var(--doc-error-line); background: var(--doc-error-bg); }
+.ck-summary.ck-issues .ck-summary-title { color: var(--doc-danger); }
+.ck-summary.ck-incomplete, .ck-summary.ck-failed { border-color: var(--doc-notice-line); background: var(--doc-notice-bg); }
+.ck-summary.ck-incomplete .ck-summary-title, .ck-summary.ck-failed .ck-summary-title { color: var(--doc-notice-ink); }
+.ck-stale { margin-top: 8px; padding: 6px 9px; border-radius: 8px; background: var(--doc-notice-bg); color: var(--doc-notice-ink); font-size: 12px; line-height: 1.5; }
+.ck-stale[hidden] { display: none; }
+.ck-group { margin-top: 12px; }
+.ck-group-title { font-weight: 600; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.ck-page { background: var(--surface); border: 1px solid var(--doc-toc-line); border-radius: 10px; padding: 6px; margin-bottom: 8px; }
+.ck-page-title { padding: 2px 5px 4px; font-weight: 600; overflow-wrap: anywhere; }
+.ck-item { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; min-height: 0; height: auto; margin: 0; padding: 6px 7px; border: 0; border-radius: 7px; background: none; font: inherit; color: var(--ink); text-align: left; cursor: pointer; }
+.ck-item + .ck-item { border-top: 1px solid var(--doc-faint-line); border-radius: 0 0 7px 7px; }
+.ck-item:hover, .ck-item:focus-visible { background: var(--soft); }
+.ck-item[aria-current="true"] { background: var(--accent-soft); }
+.ck-tag { display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 11px; line-height: 18px; background: var(--doc-tag-gray-bg); color: var(--doc-tag-gray-ink); }
+.ck-tag-reference { background: var(--doc-tag-blue-bg); color: var(--doc-tag-blue-ink); }
+.ck-tag-table { background: var(--doc-tag-green-bg); color: var(--doc-tag-green-ink); }
+.ck-tag-chart, .ck-tag-diagram { background: var(--doc-tag-purple-bg); color: var(--doc-tag-purple-ink); }
+.ck-tag-math { background: var(--doc-tag-orange-bg); color: var(--doc-tag-orange-ink); }
+.ck-title { font-weight: 600; overflow-wrap: anywhere; }
+.ck-where { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.ck-detail { font-family: var(--doc-mono); font-size: 11.5px; color: var(--ink); background: var(--soft); border-radius: 4px; padding: 0 4px; overflow-wrap: anywhere; }
+.ck-hint { color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.ck-note { margin: 14px 2px 0; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+/* 項目を選んで移った先のセル(本文の行は .ref-flash で光る)。 */
+.editor-table .ck-cell-flash { animation: ck-cell-flash 1.8s ease-out; }
+@keyframes ck-cell-flash { 0%, 40% { background-color: var(--doc-flash); box-shadow: inset 0 0 0 2px var(--doc-danger); } 100% { background-color: transparent; box-shadow: inset 0 0 0 2px transparent; } }
+.block.ref-flash .mermaid-canvas, .block.ref-flash .math-canvas { animation: ref-flash 1.6s ease-out; }
+@media print { .check-pane { display: none !important; } }
+/* ペインが開いている間、両方が収まる幅のときだけ(判定は app.js の syncChartPaneReserve)、本文の列の右に
+   ペインの幅ぶんの余白を空ける。本文の文字の列はそのぶん縮み、列と余白をまとめて中央に置く(v158)。 */
+.app.chart-pane-reserved .doc {
+  max-width: calc(var(--doc-max-width, 920px) + var(--chart-pane-width) + var(--chart-pane-gap) * 2);
+  padding-right: calc(22px + var(--chart-pane-width) + var(--chart-pane-gap) * 2);
+}
+.chart-pane-note {
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.chart-pane-note[hidden] { display: none; }
+.chart-pane-table {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.chart-pane-table select {
+  min-width: 0;
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+.chart-pane-header {
+  margin-bottom: 8px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+.chart-pane-section { display: grid; gap: 6px; }
+.chart-pane-series {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.chart-pane-series select,
+.chart-pane-series input,
+.chart-pane-globals input {
+  min-width: 0;
+  min-height: 26px;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+.chart-pane-series select { grid-column: 1 / 2; }
+/* 範囲の欄と「表から選ぶ」ボタン(v160)。文字で打つ欄は上級者向けに残す。 */
+.chart-pane-range { display: flex; gap: 2px; min-width: 0; }
+.chart-pane-range[hidden] { display: none; }
+.chart-pane-range input { flex: 1; width: 0; }
+.chart-pane-pick {
+  flex: none;
+  width: 26px;
+  min-height: 26px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.chart-pane-pick:hover:not(:disabled) { background: var(--soft); color: var(--ink); }
+.chart-pane-pick.is-picking { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.chart-pane-pick:disabled { opacity: .45; cursor: default; }
+.chart-pane-pick-hint { color: var(--accent); background: var(--accent-soft); }
+/* 範囲を選んでいる間: グラフが読んでいる表に枠を付けて選べることを示し、ほかの表は選べないので薄くする。 */
+.block.type-table.chart-range-source .editor-table { outline: 2px solid var(--accent); outline-offset: 2px; }
+.block.type-table.chart-range-source .editor-table td,
+.block.type-table.chart-range-source .editor-table th { cursor: crosshair; }
+.block.type-table.chart-range-other { opacity: .45; }
+/* グラフの元データの印(v186)。表全体は薄い枠、系列の範囲は系列の色の枠(値は実線・X/分類は破線)。クリックは表へ通す。 */
+.block.type-table.chart-source-table .editor-table { outline: 2px solid rgba(11, 107, 203, .35); outline-offset: 3px; }
+.chart-source-mark { position: absolute; z-index: 3; box-sizing: border-box; border: 2px solid; border-radius: 2px; pointer-events: none; }
+.chart-source-mark.is-axis { border-style: dashed; }
+.chart-pane-table-row { display: flex; align-items: end; gap: 6px; margin-bottom: 8px; }
+.chart-pane-table-row .chart-pane-table { flex: 1; min-width: 0; margin-bottom: 0; }
+.chart-pane-table-jump { flex: none; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; font-size: 12px; cursor: pointer; }
+.chart-pane-table-jump:hover:not(:disabled) { background: var(--soft); }
+.chart-pane-table-jump:disabled { color: var(--muted); cursor: default; }
+/* 表の編集中の行番号・列番号(v186)。番地(A1)と同じ呼び方。今のセルの行・列は強調。表の左はつまみと重なるので編集中はつまみを隠す。 */
+.table-axis-label { position: absolute; z-index: 3; transform: translate(-50%, -50%); color: var(--muted); font-size: 11px; line-height: 1; pointer-events: none; user-select: none; font-variant-numeric: tabular-nums; }
+.table-axis-label.is-current { color: var(--accent); font-weight: 700; }
+.chart-pane-series .chart-pane-remove {
+  grid-column: 2 / 3;
+  justify-self: end;
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.chart-pane-series .chart-pane-remove:hover { background: var(--soft); color: var(--ink); }
+.chart-pane-add {
+  margin: 8px 0;
+  min-height: 28px;
+  padding: 2px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+.chart-pane-add:hover { background: var(--soft); }
+.chart-pane-globals label {
+  display: grid;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.chart-pane-empty { color: var(--muted); font-size: 12px; }
+/* 系列の色(v163): 既定の配色の見本と自由入力の欄。 */
+.chart-pane-color { grid-column: 1 / -1; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.chart-pane-color input { flex: 1; width: 0; }
+.chart-pane-swatch {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, .15);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.chart-pane-swatch[aria-pressed="true"] { outline: 2px solid var(--ink); outline-offset: 1px; }
+/* 軸の範囲の欄(v165)。X・Y の最小・最大を2列で。 */
+.chart-pane-limits { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.chart-pane-limits input:disabled { background: var(--soft); color: var(--muted); }
+.chart-pane-limits input[aria-invalid="true"] { border-color: #b4482f; background: #fdf1ee; }
+.chart-pane-values { grid-column: 1 / -1; display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12px; }
+.chart-pane-values[hidden] { display: none; }
+/* 近似直線の切り替え(v177)。「近似直線」「式」「R²」を1行に並べる。 */
+.chart-pane-trend { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; }
+.chart-pane-trend[hidden] { display: none; }
+/* 円グラフのとき隠す欄(v168)。author 側の display 指定が UA 既定の [hidden] に勝つので、明示して消す。 */
+.chart-pane-globals label[hidden],
+.chart-pane-limits[hidden],
+.chart-pane-color[hidden],
+.chart-pane-add[hidden] { display: none; }
+.chart-pane-globals select {
+  min-width: 0;
+  min-height: 26px;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+/* 狭い画面では右固定だと本文に覆いかぶさるので、下側のシートにする。 */
+@media (max-width: 700px) {
+  .chart-pane {
+    top: auto;
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    width: auto;
+    max-height: 45vh;
+  }
+}
+
+/* 印刷・PDF(v182)。印刷は File の「Print / PDF」(Ctrl+P)で、保存HTMLの形を見えない枠(.print-frame)で刷る。
+   その枠は画面の外に置く(display:none にすると中身を組まないので、位置で隠す)。 */
+.print-frame { position: fixed; left: -10000px; top: 0; width: 900px; height: 1200px; border: 0; opacity: 0; pointer-events: none; }
+/* ブラウザのメニューから直接刷られたときの最低限: 道具・目次・つまみなどの画面の部品は刷らない(本文は表示中のページだけ)。 */
+@media print {
+  /* ブラウザのメニューから印刷したときの最低限(Ctrl+P・File→Print は文書の印刷 printDocument を使う)。
+     ブロックのつまみ(.handle)は消さずに見えなくする(v252。Issue #101。display:none だと本文が .block の1列目(40px)へ繰り上がり、
+     1行に1〜2文字ずつ縦に並んでいた)。グラフの設定欄・見出しの道筋・ページ一覧の幅のつまみも刷らない。 */
+  .page-tree, .page-tree-resizer, .toolbar, .version-badge, .app-notice, .page-lock-toggle, .page-backlinks, .popover, .print-frame,
+  #chart-pane, #heading-path { display: none !important; }
+  .handle { visibility: hidden !important; }
+}
+
+/* ---- データベースの表(v229。案1〜4 でユーザーが決めた見た目) ---- */
+/* 表の道具の帯の右端に「データベース」の切り替え(案1)。入っているときは青。 */
+.table-tool-separator { display: inline-block; width: 1px; height: 22px; margin: 0 4px 0 6px; background: var(--line); vertical-align: middle; }
+.table-tool.table-tool-db { width: auto; display: inline-flex; align-items: center; gap: 5px; padding: 0 9px; color: var(--ink); }
+.table-tool.table-tool-db .ui-icon { width: 14px; height: 14px; }
+.table-tool.table-tool-db.is-on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+/* 列の名前のセルの左に種類の印(案2)。印を押すと種類のメニュー(案3)。 */
+.editor-table.db-table th[data-db-type] { position: relative; padding-left: 30px; }
+.editor-table.db-table th[data-db-type]::before { position: absolute; left: 8px; top: 7px; width: 18px; color: var(--muted); font-size: 11px; font-weight: 600; line-height: 21px; text-align: center; cursor: pointer; user-select: none; }
+.editor-table.db-table th[data-db-type="text"]::before { content: "Aa"; }
+.editor-table.db-table th[data-db-type="number"]::before { content: "#"; }
+.editor-table.db-table th[data-db-type="date"]::before { content: "📅"; }
+.editor-table.db-table th[data-db-type="select"]::before { content: "◉"; }
+.editor-table.db-table th[data-db-type="check"]::before { content: "☑"; }
+.editor-table.db-table th[data-db-type="link"]::before { content: "🔗"; }
+/* 0.8.21 の種類(Issue #178)。印は app.js の DB_TYPE_MARKS と同じ */
+.editor-table.db-table th[data-db-type="multi"]::before { content: "☰"; }
+.editor-table.db-table th[data-db-type="status"]::before { content: "◔"; }
+.editor-table.db-table th[data-db-type="url"]::before { content: "🌐"; }
+.editor-table.db-table th[data-db-type="email"]::before { content: "@"; }
+.editor-table.db-table th[data-db-type="phone"]::before { content: "☎"; }
+.editor-table.db-table th[data-db-type="file"]::before { content: "📎"; }
+.editor-table.db-table th[data-db-type="created"]::before { content: "⏱"; }
+.editor-table.db-table th[data-db-type="edited"]::before { content: "✎"; }
+.editor-table td.db-col-number { text-align: right; font-variant-numeric: tabular-nums; }
+.editor-table td.db-col-check { text-align: center; cursor: pointer; }
+.editor-table td.db-col-created, .editor-table td.db-col-edited { cursor: default; }
+/* 複数選択・状態の手伝い: 選んでいる札は輪郭で示す。状態は組ごとの段 */
+.db-select-option.is-on > .db-pill, .db-select-option.is-on > .db-status { box-shadow: 0 0 0 2px var(--accent); }
+.db-status-section { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.db-status-section-title { flex-basis: 100%; color: var(--muted); font-size: 11.5px; font-weight: 600; }
+.db-file-options { flex-basis: 100%; }
+/* 表のグループ分け(Issue #179)。組の頭の行: 三角・名前・行の数。押すと畳む・開く(保存HTMLの .doc-group-* と同じ見た目) */
+.editor-table tr.table-group-row > th.table-group-cell { padding: 4px 8px; background: var(--soft); font-weight: 600; text-align: left; cursor: pointer; }
+.table-group-toggle { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 2px 4px; border: 0; border-radius: 5px; background: none; color: var(--ink); font: inherit; font-weight: 600; cursor: pointer; }
+.table-group-toggle:hover { background: var(--doc-hover); }
+.table-group-arrow { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid var(--muted); transition: transform .12s; }
+.table-group-toggle[aria-expanded="false"] .table-group-arrow { transform: rotate(-90deg); }
+.table-group-count { color: var(--muted); font-weight: 400; font-size: .9em; }
+.table-group-empty { color: var(--muted); font-weight: 400; }
+.editor-table tr.table-group-copy > td { color: var(--muted); background: var(--soft); cursor: pointer; }
+/* 札(.db-pill・.db-status)・四角(.db-check)・リンク(a.db-link)・時刻・添付の見た目は (document-style.js の SHARED_CSS。エディタと保存HTMLで同じ規則。Issue #201) */
+/* 列の種類のメニュー(案3) */
+.popover.db-column-menu { width: 220px; }
+.db-column-menu-title { padding: 4px 8px 4px; color: var(--muted); font-size: 11.5px; font-weight: 600; }
+.db-type-mark { color: var(--muted); font-size: 11px; font-weight: 600; text-align: center; }
+/* 選択肢・リンクのセルの手伝い(セルの下に出す) */
+.popover.db-cell-helper { width: auto; min-width: 200px; max-width: min(420px, calc(100vw - 24px)); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px; }
+.db-select-option { padding: 0; border: 0; background: none; cursor: pointer; }
+.db-cell-helper-hint { flex-basis: 100%; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.db-link-field { display: flex; flex: 1 1 240px; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.db-link-input { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 13px; color: var(--ink); background: var(--surface); }
+.db-link-pick { height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font-size: 13px; cursor: pointer; }
+/* リンクのセルの「ページを選ぶ…」の一覧(v267 #147)。手伝いの下の段いっぱいに出す。 */
+.db-page-list { flex-basis: 100%; display: grid; gap: 6px; }
+.db-page-filter { height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 13px; color: var(--ink); background: var(--surface); }
+.db-page-filter:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.db-page-options { display: grid; max-height: 220px; overflow-y: auto; }
+.db-page-option { overflow: hidden; padding: 5px 8px; border: 0; border-radius: 6px; background: none; color: var(--ink); font-size: 13px; text-align: left; white-space: nowrap; text-overflow: ellipsis; cursor: pointer; }
+.db-page-option:hover { background: var(--soft); }
+.db-page-option[aria-selected="true"] { background: var(--accent-soft); }
+/* アプリの中の確認(案4)。window.confirm の代わり。 */
+.confirm-backdrop { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: rgba(32, 33, 36, .32); }
+.confirm-dialog { box-sizing: border-box; width: min(440px, calc(100vw - 32px)); padding: 20px 22px 16px; border-radius: 10px; background: var(--surface); box-shadow: 0 16px 40px rgba(0, 0, 0, .2); color: var(--ink); font-size: 14px; line-height: 1.6; }
+.confirm-dialog h3 { margin: 0 0 8px; font-size: 16px; }
+.confirm-dialog p { margin: 0; }
+.confirm-dialog .confirm-note { margin-top: 6px; color: var(--muted); font-size: 13px; }
+.confirm-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.confirm-buttons button { height: 32px; padding: 0 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font-size: 13.5px; font-weight: 500; cursor: pointer; }
+.confirm-buttons button.primary { border-color: var(--accent); background: var(--accent); color: #fff; }
+
+/* ---- 表の行・列の入れ替え(v230)。取っ手をドラッグすると、動かす行・列を薄く塗り、移動先に青い線を出す ---- */
+.table-range-handle { cursor: grab; }
+.editor-table td.table-line-moving, .editor-table th.table-line-moving { background: var(--accent-soft); }
+.table-move-indicator { position: absolute; z-index: 6; border-radius: 2px; background: var(--accent); pointer-events: none; }
+.table-move-indicator.row { height: 3px; }
+.table-move-indicator.col { width: 3px; }
+.table-move-indicator.is-blocked { background: #c1512f; opacity: .6; }
+
+/* ---- 広い表の横スクロール(v231。ユーザー選択「1」) ----
+   列幅を広げて本文の欄より広くなった表は、表の入れ物の中で横にスクロールする(本文の欄は横にはみ出させない: .main の overflow-x: clip)。
+   取っ手・番号は見えている範囲にだけ出す(app.js の renderTableRangeHandles)。 */
+.block.type-table > .block-content { overflow-x: auto; overflow-y: hidden; }
+
+/* ---- 表を見せる高さ(v235。案A・つまみは案1「下の端のつまみ」。ユーザー選択) ----
+   高さを決めた表(.has-view-height)は、その高さで止めて表の中で縦にスクロールする。見出しの行は上に残す。
+   表の上の帯(列の記号の場所)の余白は、スクロールしないよう表ではなく入れ物に付ける。
+   つまみは表の下の端に重ねる(高さを決めていない表のレイアウトを変えない)。決めた表では下に場所を空け、「40行中 13行」も出す。 */
+.block.type-table.has-view-height > .block-content { overflow-y: auto; margin-top: 18px; padding-top: 0; padding-bottom: 0; }
+.block.type-table.has-view-height.has-caption > .block-content { margin-top: 0; }
+.block.type-table.has-view-height .editor-table { margin-top: 0; }
+.block.type-table.has-view-height .editor-table tr:first-child > th { position: sticky; top: 0; z-index: 1; box-shadow: 0 1px 0 var(--line); }
+.block.type-table.has-view-height { margin-bottom: 12px; }
+.table-height-grip {
+  grid-column: 2;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -11px;
+  height: 12px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+  opacity: 0;
+  transition: opacity .12s;
+}
+.table-height-bar { width: 44px; height: 4px; border-radius: 2px; background: #c3c8cf; }
+.table-height-grip:hover .table-height-bar, .block.is-resizing-height .table-height-bar { background: var(--doc-chart-axis); }
+.table-height-count { position: absolute; right: 2px; top: -1px; font-size: 11px; line-height: 14px; color: #8a9099; white-space: nowrap; pointer-events: none; }
+.block.type-table:hover > .table-height-grip,
+.block.type-table:focus-within > .table-height-grip,
+.block.type-table.has-view-height > .table-height-grip,
+.block.is-resizing-height > .table-height-grip { opacity: 1; }
+@media print { .table-height-grip { display: none; } }
+
+/* ---- 表の配置・数の見せ方・並べ替え・絞り込み(v232) ---- */
+/* 道具の帯: 押されている配置は青(データベースの切り替えと同じ)。文字のボタン(123)と、メニューを開くボタンの小さな三角。 */
+.table-tool.is-on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.table-tool.table-tool-text { width: auto; padding: 0 7px; font-size: 12px; font-weight: 600; letter-spacing: .02em; }
+.table-tool[aria-haspopup="menu"] { width: auto; display: inline-flex; align-items: center; gap: 3px; padding: 0 6px 0 7px; }
+.table-tool[aria-haspopup="menu"] .ui-icon { width: 16px; height: 16px; }
+.table-tool-caret { width: 0; height: 0; border-left: 3.5px solid transparent; border-right: 3.5px solid transparent; border-top: 4px solid currentColor; opacity: .75; }
+/* 道具の帯から開くメニュー。左に ✓、右に例(1,234 など)。 */
+.popover.table-tool-menu { width: 248px; }
+.table-tool-menu-title { padding: 4px 8px 4px; color: var(--muted); font-size: 11.5px; font-weight: 600; }
+.menu-item.table-tool-menu-item { grid-template-columns: 18px 1fr auto; gap: 6px; }
+.menu-item.table-tool-menu-item:disabled { opacity: .45; cursor: default; }
+.table-tool-menu-check { color: var(--accent); font-weight: 700; text-align: center; }
+.table-tool-menu-hint { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+/* 並べ替え・絞り込み(v232)。絞り込みは値のチェックの一覧(Excel のフィルターと同じ)。 */
+.table-filter-panel { padding: 2px 4px 4px; }
+.table-filter-list { max-height: 240px; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+.table-filter-option { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; align-items: center; padding: 5px 6px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.table-filter-option:hover { background: var(--accent-soft); }
+.table-filter-option.is-all { border-bottom: 1px solid var(--line); border-radius: 0; margin-bottom: 2px; }
+.table-filter-option input { margin: 0; }
+.table-filter-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.table-filter-count { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.table-filter-others { margin: 6px 2px 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.table-filter-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+/* 条件と列どうしの組み合わせ(Issue #180)。条件の欄が入るので、絞り込みのメニューだけ少し広い。 */
+.popover.table-tool-menu:has(.table-filter-panel) { width: 288px; max-height: min(600px, calc(100vh - 16px)); }
+.table-tool-menu .table-filter-list { max-height: min(240px, 28vh); }
+.table-filter-section { padding: 6px 2px 4px; color: var(--muted); font-size: 11.5px; font-weight: 600; }
+.table-filter-section:first-child { padding-top: 0; }
+.table-filter-condition { display: grid; gap: 6px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.table-filter-op, .table-filter-input { box-sizing: border-box; width: 100%; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; }
+.table-filter-op:focus, .table-filter-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+.table-filter-input[aria-invalid="true"] { border-color: #c1512f; }
+.table-filter-operands { display: grid; grid-template-columns: 1fr; gap: 6px; align-items: center; }
+.table-filter-operands.is-range { grid-template-columns: 1fr auto 1fr; }
+.table-filter-operands[hidden], .table-filter-operands [hidden] { display: none; }
+.table-filter-between { color: var(--muted); font-size: 12px; }
+.table-filter-error { color: #c1512f; font-size: 12px; line-height: 1.4; }
+.table-filter-error:empty { display: none; }
+.table-filter-join { display: grid; gap: 2px; margin-top: 6px; }
+.table-filter-join-title { padding: 0 2px 2px; color: var(--muted); font-size: 11.5px; font-weight: 600; }
+.table-filter-join-option { display: flex; gap: 8px; align-items: center; padding: 4px 6px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.table-filter-join-option:hover { background: var(--accent-soft); }
+.table-filter-join-option input { margin: 0; }
+.table-filter-spacer { flex: 1; }
+.table-filter-button { height: 28px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font-size: 13px; cursor: pointer; }
+.table-filter-button:disabled { opacity: .45; cursor: default; }
+.table-filter-button.is-primary { border-color: var(--accent); background: var(--accent); color: #fff; }
+/* 絞り込み中の表は、表の下に一言(保存HTMLの .doc-table-filter-note と同じ)。 */
+.block.type-table > .block-content[data-filter-note]::after { content: attr(data-filter-note); display: block; margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+/* ---- 表の全画面の編集(v238) ----
+   表は文書の中の場所のまま、ほかのもの(目次・上のツールバー・題名・ほかのブロック・グラフの設定欄)を隠し、本文の欄の幅の
+   制限を外す。上に表の呼び名と「閉じる」の帯。段組みの中の表は、その列だけを残して段組みを解く。 */
+body.table-focus .page-tree,
+body.table-focus .page-tree-resizer,
+body.table-focus .main > .toolbar,
+body.table-focus .title-row,
+body.table-focus .chart-pane { display: none !important; }
+body.table-focus .doc { max-width: none; padding: 64px 28px 96px; }
+body.table-focus #blocks > :not(.table-focus-target):not(:has(.table-focus-target)) { display: none !important; }
+body.table-focus .column-layout:has(.table-focus-target) { display: block; }
+body.table-focus .column-layout:has(.table-focus-target) > :not(:has(.table-focus-target)):not(.table-focus-target) { display: none !important; }
+body.table-focus .column:has(.table-focus-target) > :not(.table-focus-target) { display: none !important; }
+.table-focus-bar { position: fixed; z-index: 24; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 12px; height: 48px; padding: 0 16px 0 24px;
+  border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, .96); box-shadow: 0 4px 12px var(--doc-shadow-soft); }
+.table-focus-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 14px; font-weight: 600; }
+.table-focus-hint { flex: none; color: var(--muted); font-size: 12px; }
+.table-focus-close { flex: none; display: inline-flex; align-items: center; gap: 6px; margin-left: auto; height: 30px; padding: 0 12px; border: 1px solid var(--line);
+  border-radius: 6px; background: var(--surface); color: var(--ink); font-size: 13px; cursor: pointer; }
+.table-focus-close:hover { border-color: var(--accent); color: var(--accent); }
+.table-focus-close .ui-icon { width: 16px; height: 16px; }
+.table-tool.table-tool-focus.is-on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+@media print { .table-focus-bar { display: none !important; } }
+@media (max-width: 900px) { body.table-focus .doc { padding-left: 12px; padding-right: 12px; } }
+/* 全画面の表の見出し(行番号・列番号。Excel と同じ。v238)。選んだ列・行は青、列・行ごと選んだときは濃い青。 */
+body.table-focus .block.table-focus-target .editor-table { margin-top: 26px; }
+body.table-focus .block.table-focus-target[data-table-label]::after { display: none; }
+.sheet-header { position: absolute; box-sizing: border-box; }
+.sheet-col-strip { z-index: 6; overflow: hidden; background: #f3f4f6; border: 1px solid #d5d8dd; border-bottom: 0; }
+.sheet-row-strip { z-index: 5; background: #f3f4f6; border: 1px solid #d5d8dd; border-right: 0; }
+.sheet-corner { z-index: 7; background: var(--doc-placeholder-bg); border: 1px solid #d5d8dd; cursor: cell; }
+.sheet-corner.is-full { background: var(--accent); }
+.sheet-col-header, .sheet-row-header { position: absolute; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+  color: #5f6368; font-size: 12px; font-variant-numeric: tabular-nums; user-select: none; }
+.sheet-col-header { top: 0; height: 100%; border-right: 1px solid #d5d8dd; cursor: s-resize; }
+.sheet-row-header { left: 0; width: 100%; border-bottom: 1px solid #d5d8dd; cursor: e-resize; }
+.sheet-col-header.is-active, .sheet-row-header.is-active { background: #dfe8f7; color: var(--accent); font-weight: 600; }
+.sheet-col-header.is-full, .sheet-row-header.is-full { background: var(--accent); color: #fff; font-weight: 600; cursor: grab; }
+.sheet-col-resizer { position: absolute; z-index: 1; top: 0; width: 8px; height: 100%; cursor: col-resize; }
+.sheet-col-resizer:hover, .sheet-col-resizer.resizing { background: linear-gradient(to right, transparent 3px, var(--accent) 3px, var(--accent) 5px, transparent 5px); }
+/* 行の高さのつまみ(v238。列の幅のつまみと対)。ふだんは行の番号の下の端、全画面では行の見出しの下の端。 */
+.table-row-resizer { position: absolute; z-index: 4; width: 26px; height: 6px; cursor: row-resize; outline: 0; border-radius: 2px; }
+.table-row-resizer:hover, .table-row-resizer.resizing, .table-row-resizer:focus-visible { background: linear-gradient(to bottom, transparent 2px, var(--accent) 2px, var(--accent) 4px, transparent 4px); }
+.sheet-row-resizer { position: absolute; z-index: 1; left: 0; width: 100%; height: 8px; cursor: row-resize; }
+.sheet-row-resizer:hover, .sheet-row-resizer.resizing { background: linear-gradient(to bottom, transparent 3px, var(--accent) 3px, var(--accent) 5px, transparent 5px); }
+@media print { .table-row-resizer { display: none; } }
+
+/* ---- 文書の書体と小さい文字(Issue #190) ---- */
+/* View メニューの「文書の書体」。Notion のページの「スタイル」と同じく、見本の「Ag」をその書体で並べ、選んでいるものを青で囲む。 */
+.menu-group-label { padding: 6px 8px 2px; color: var(--muted); font-size: 12px; }
+.menu-font-styles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 2px 2px 4px; }
+.menu-command.menu-font-style { flex-direction: column; justify-content: center; gap: 0; padding: 6px 4px 4px; border: 1px solid var(--line); color: var(--muted); font-size: 12px; text-align: center; }
+.menu-command.menu-font-style[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.menu-font-sample { color: var(--ink); font-size: 22px; line-height: 1.15; }
+/* 小さい文字(app.js が .doc に doc-text-small を付ける)。本文 15px → 13.125px(Notion の 16 → 14 と同じ 0.875 倍)、見出しも同じ割合。
+   題名の大きさは変えない。記号(つまみ・点・番号・箱・三角・呼び出しの絵文字)の縦の位置(--first-line-center)は、1行目の中心へ合わせ直す。
+   大きさは document-style.js の小さい文字の値(.doc-text-small の --doc-…。保存HTMLも同じ値。layoutParity と同じ測り方で appearanceSuite が見る)。 */
+.doc-text-small .blocks { font-size: var(--doc-font-size); }
+.doc-text-small .block { --first-line-center: 12.39px; }
+.doc-text-small .block.type-table { --first-line-center: 9px; }
+.doc-text-small .type-toc { --first-line-center: 22px; }
+.doc-text-small .type-code { --first-line-center: 19.39px; }
+.doc-text-small .block.type-callout { --first-line-center: 19.84px; }
+.doc-text-small .callout-icon { top: 7.84px; }
+.doc-text-small .type-heading1, .doc-text-small .type-toggleHeading1 { --first-line-center: 29.71px; }
+.doc-text-small .type-heading2, .doc-text-small .type-toggleHeading2 { --first-line-center: 21.81px; }
+.doc-text-small .type-heading3, .doc-text-small .type-toggleHeading3 { --first-line-center: 18.48px; }
+.doc-text-small .type-heading4, .doc-text-small .type-toggleHeading4 { --first-line-center: 15.4px; }
+.doc-text-small .type-heading5, .doc-text-small .type-toggleHeading5 { --first-line-center: 12.73px; }
+
+/* ---- ページのアイコンとカバー画像(Issue #184) ---- */
+/* 題名の行は折り返せるようにして、アイコンを題名の上の1行に置く(アイコンが無いときは今までどおり1行)。足す道具は題名の上の余白
+   (.doc の上の余白 42px)に重ね、題名の帯に乗せたとき・キーで来たときだけ見せる(帯に常に出る文字は足さない。ユーザーの好み)。
+   乗せる範囲を余白まで広げるため、題名の行の ::before で上の余白を覆う(乗せたのは題名の行の :hover になる)。 */
+.title-row { position: relative; flex-wrap: wrap; }
+.title-row::before { content: ""; position: absolute; left: 0; right: 0; top: -42px; height: 42px; }
+.page-head-tools { position: absolute; z-index: 1; left: -6px; top: -38px; display: flex; gap: 2px; opacity: 0; transition: opacity .12s ease; }
+.title-row:hover .page-head-tools, .page-head-tools:focus-within { opacity: 1; }
+.page-head-tool { display: inline-flex; align-items: center; gap: 5px; height: 28px; min-height: 28px; padding: 0 8px; border-color: transparent; background: transparent; color: var(--muted); font-size: 13px; }
+.page-head-tool:hover { background: rgba(55, 53, 47, .08); color: var(--ink); }
+.page-head-tool[hidden] { display: none; }
+.page-head-tool .ui-icon { width: 16px; height: 16px; }
+body.page-locked .page-head-tools { display: none; }
+/* アイコン(保存HTMLの .doc-page-icon と同じ寸法。P7)。題名との間の 8px は題名の行の gap(折り返した行どうしの間)。 */
+.page-icon-row { flex: 0 0 100%; height: 64px; }
+.page-icon-row[hidden] { display: none; }
+.page-icon { display: block; width: 64px; height: 64px; min-height: 64px; padding: 0; border: 0; border-radius: 8px; background: transparent; font-size: 52px; line-height: 64px; text-align: center; }
+.page-icon:hover { background: rgba(55, 53, 47, .08); }
+body.page-locked .page-icon { cursor: default; }
+body.page-locked .page-icon:hover { background: transparent; }
+/* 目次・ページのブロックのアイコン。 */
+.page-tree-icon { display: inline-block; width: 1.25em; margin-right: .3em; text-align: center; }
+.page-link-icon.is-emoji { align-items: center; justify-content: center; line-height: 1; }
+/* カバー画像(保存HTMLの .doc-cover と同じ高さ 200px)。本文の欄(.main)の端から端まで。題名の帯の灰色は、カバーの下(.doc の上の余白)から。 */
+.main > .page-cover { grid-row: 2; }
+.main > .doc { grid-row: 3; }
+.page-cover { position: relative; height: 200px; overflow: hidden; background: var(--doc-placeholder-bg); }
+.page-cover[hidden] { display: none; }
+.page-cover-image { display: block; width: 100%; height: 100%; object-fit: cover; user-select: none; -webkit-user-drag: none; }
+.doc.has-cover .title-row { clip-path: inset(-42px -100vmax -1px -100vmax); }
+.page-cover-tools { position: absolute; right: 16px; bottom: 12px; display: flex; overflow: hidden; border-radius: 6px; background: var(--doc-bar-bg); box-shadow: 0 1px 4px rgba(0, 0, 0, .2); opacity: 0; transition: opacity .12s ease; }
+.page-cover:hover .page-cover-tools, .page-cover:focus-within .page-cover-tools, .page-cover.is-repositioning .page-cover-tools { opacity: 1; }
+.page-cover-tool { height: 28px; min-height: 28px; padding: 0 10px; border: 0; border-radius: 0; background: transparent; color: var(--ink); font-size: 12.5px; }
+.page-cover-tool + .page-cover-tool { border-left: 1px solid var(--line); }
+.page-cover-tool:hover { background: var(--soft); }
+.page-cover.is-repositioning { cursor: ns-resize; }
+.page-cover.is-repositioning .page-cover-tool:not(#page-cover-reposition) { display: none; }
+.page-cover-hint { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 5px 12px; border-radius: 6px; background: rgba(32, 33, 36, .72); color: #fff; font-size: 12.5px; pointer-events: none; }
+.page-cover-hint[hidden] { display: none; }
+body.page-locked .page-cover-tools { display: none; }
+body.table-focus .page-cover { display: none !important; }
+/* 絵文字を選ぶ一覧の上の段(ページのアイコンだけ): 検索の欄と「削除」。 */
+.icon-picker-head { grid-column: 1 / -1; display: flex; gap: 6px; margin-bottom: 4px; }
+.icon-picker-search { flex: 1; min-width: 0; height: 30px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; }
+.icon-picker-remove { flex: none; height: 30px; min-height: 30px; padding: 0 10px; font-size: 13px; color: var(--muted); }
+.icon-picker-empty { grid-column: 1 / -1; padding: 8px 4px; color: var(--muted); font-size: 12.5px; }
